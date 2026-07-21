@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from importlib.metadata import version
+import json
 from unittest.mock import AsyncMock
 
 import pytest
@@ -57,7 +59,13 @@ async def test_allowlisted_pair_is_auto_executed_and_audited_before_dispatch(
     assert result == {"claimId": "c1"}
     real_mcp_call_tool.assert_awaited_once_with("http://db", "insertClaim", {"amount": 42})
     assert order == ["audit", "execute"]
-    assert audit_sink.entries[0]["disposition"]["decision"] == "Auto-Execute"
+    entry = audit_sink.entries[0]
+    assert entry["disposition"]["decision"] == "Auto-Execute"
+    installed_version = version("agentic-governance")
+    assert entry["disposition"]["policyVersion"] == installed_version
+    assert entry["envelope"]["contextMetadata"]["policyVersion"] == installed_version
+    assert entry["controlVersions"]["policyVersion"] == installed_version
+    assert "slice-" not in json.dumps(entry)
 
 
 @pytest.mark.asyncio

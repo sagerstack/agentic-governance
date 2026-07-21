@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentic_governance._version import PACKAGE_VERSION
+
 
 @dataclass(frozen=True)
 class FiredControl:
@@ -18,7 +20,7 @@ class Disposition:
     decision: str
     reasons: tuple[str, ...] = ()
     fired_controls: tuple[FiredControl, ...] = ()
-    policy_version: str = "slice-1"
+    policy_version: str = PACKAGE_VERSION
     latency_ms: float | None = None
 
 

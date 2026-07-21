@@ -15,4 +15,4 @@ class InMemoryIdentityRegistry:
 
 class InMemoryMandateStore:
     async def mandate_for(self, identity: str | None) -> dict:
-        return {"identity": identity, "scope": "slice-0"}
+        return {"identity": identity, "scope": "global"}

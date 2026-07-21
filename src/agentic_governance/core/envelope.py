@@ -6,6 +6,8 @@ from hashlib import sha256
 from typing import Any
 from uuid import uuid4
 
+from agentic_governance._version import PACKAGE_VERSION
+
 
 REDACT_KEYS = {"receipt", "image", "imagePath", "rawReceipt", "payload", "content", "body"}
 
@@ -57,7 +59,7 @@ def build_envelope(
 ) -> GovernanceEnvelope:
     correlation_id = session_claim_id or _stable_hash({"employeeId": employee_id, "toolName": tool_name})
     metadata = {
-        "policyVersion": "slice-1",
+        "policyVersion": PACKAGE_VERSION,
         "graphStateSnapshotRef": _stable_hash(
             {
                 "employeeId": employee_id,
