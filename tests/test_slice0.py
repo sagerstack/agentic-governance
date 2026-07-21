@@ -37,7 +37,11 @@ class RaisingEngine(GovernanceEngine):
 
 
 @pytest.fixture
-def providers():
+def providers(monkeypatch):
+    monkeypatch.setenv("RAG_MCP_URL", "http://rag")
+    monkeypatch.setenv("DB_MCP_URL", "http://db")
+    monkeypatch.setenv("CURRENCY_MCP_URL", "http://currency")
+    monkeypatch.delenv("AGENTIC_GOV_DENY_TOOLS", raising=False)
     return {
         "employee_id_provider": lambda: "emp-123",
         "extracted_receipt_provider": lambda: {"merchant": "Cafe", "total": 42, "receipt": "SECRET-RECEIPT-PAYLOAD"},
@@ -81,7 +85,10 @@ async def test_normal_mode_does_not_block_high_impact_calls(providers):
 
 
 @pytest.mark.asyncio
-async def test_fail_closed_denies_insert_claim_when_governance_is_unavailable(providers):
+@pytest.mark.parametrize("high_impact_tool", ["insertClaim", "updateClaimStatus"])
+async def test_fail_closed_denies_high_impact_tools_when_governance_is_unavailable(
+    providers, high_impact_tool
+):
     real_mcp_call_tool = AsyncMock(return_value={"claimId": "c1"})
     audit_sink = MemoryAuditSink(fail_first=True)
     governed = install(
@@ -91,7 +98,7 @@ async def test_fail_closed_denies_insert_claim_when_governance_is_unavailable(pr
         **providers,
     )
 
-    result = await governed("http://db", "insertClaim", {"amount": 42})
+    result = await governed("http://db", high_impact_tool, {"amount": 42})
     assert result == {"error": "governance-unavailable", "decision": "Deny"}
     real_mcp_call_tool.assert_not_awaited()
     assert audit_sink.entries == []
@@ -101,5 +108,8 @@ async def test_fail_closed_denies_insert_claim_when_governance_is_unavailable(pr
     assert len(audit_sink.entries) == 2
     assert audit_sink.entries[0]["disposition"]["decision"] == "Deny"
     assert audit_sink.entries[0]["disposition"]["reasons"] == ["governance-unavailable"]
-    assert audit_sink.entries[0]["envelope"]["toolName"] == "insertClaim"
+    assert audit_sink.entries[0]["envelope"]["toolName"] == high_impact_tool
     assert audit_sink.entries[1]["disposition"]["decision"] == "Observe"
+    assert audit_sink.entries[1]["disposition"]["reasons"] == [
+        "governance-unavailable-non-high-impact"
+    ]

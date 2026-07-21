@@ -18,7 +18,7 @@ class Disposition:
     decision: str
     reasons: tuple[str, ...] = ()
     fired_controls: tuple[FiredControl, ...] = ()
-    policy_version: str = "slice-0"
+    policy_version: str = "slice-1"
     latency_ms: float | None = None
 
 

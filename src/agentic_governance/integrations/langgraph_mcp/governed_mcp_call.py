@@ -33,7 +33,7 @@ class _GovernedMcpRuntime:
         self._real_mcp_call_tool = real_mcp_call_tool
         self._providers = providers
         self._engine = engine or GovernanceEngine(DeterministicPolicyDecisionPoint())
-        self._audit_sink = audit_sink or JsonlAuditSink("./.agentic_governance/audit.jsonl")
+        self._audit_sink = audit_sink or JsonlAuditSink("./.agentic_governance/")
         self._identity_registry = identity_registry or InMemoryIdentityRegistry()
         self._mandate_store = mandate_store or InMemoryMandateStore()
         self._pending_audit_events: list[tuple[GovernanceEnvelope, Disposition]] = []
@@ -61,14 +61,17 @@ class _GovernedMcpRuntime:
                     FiredControl(control_id="A12", name="fail-closed-floor", result="observe"),
                 ),
             )
-            result = await self._real_mcp_call_tool(serverUrl, toolName, arguments)
-            self._pending_audit_events.append((envelope, disposition))
-            await self._try_flush_pending_audit_events()
-            return result
+            # Record the decision before dispatch, including the fail-open Observe floor.
+            await self._record(envelope, disposition)
+            return await self._real_mcp_call_tool(serverUrl, toolName, arguments)
 
-        result = await self._real_mcp_call_tool(serverUrl, toolName, arguments)
+        # The audit event represents the decision point and therefore precedes any
+        # permitted side effect. A denied call never reaches the real MCP client.
         await self._record(envelope, disposition)
-        return result
+        if disposition.decision == "Deny":
+            reason = disposition.reasons[0] if disposition.reasons else "denied"
+            return {"error": reason, "decision": "Deny"}
+        return await self._real_mcp_call_tool(serverUrl, toolName, arguments)
 
     async def _record(self, envelope: GovernanceEnvelope, disposition: Disposition) -> None:
         self._pending_audit_events.append((envelope, disposition))

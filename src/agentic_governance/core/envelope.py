@@ -57,7 +57,7 @@ def build_envelope(
 ) -> GovernanceEnvelope:
     correlation_id = session_claim_id or _stable_hash({"employeeId": employee_id, "toolName": tool_name})
     metadata = {
-        "policyVersion": "slice-0",
+        "policyVersion": "slice-1",
         "graphStateSnapshotRef": _stable_hash(
             {
                 "employeeId": employee_id,

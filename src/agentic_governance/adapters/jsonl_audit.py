@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -12,8 +13,20 @@ from agentic_governance.core.envelope import GovernanceEnvelope
 
 class JsonlAuditSink:
     def __init__(self, path: str | Path) -> None:
-        self._path = Path(path)
+        configured_path = Path(path)
+        if configured_path.suffix == ".jsonl":
+            # An explicit file remains an exact, backward-compatible override.
+            self._path = configured_path
+        else:
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            random_suffix = uuid4().hex[:6]
+            self._path = configured_path / f"audit-{timestamp}-{random_suffix}.jsonl"
         self._path.parent.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def path(self) -> Path:
+        """The file selected once for this runtime's audit events."""
+        return self._path
 
     async def append(self, envelope: GovernanceEnvelope, disposition: Disposition) -> None:
         entry = build_audit_entry(envelope, disposition)
