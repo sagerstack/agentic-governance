@@ -1,10 +1,4 @@
-"""Governance-owned least-privilege policy configuration.
-
-The application already exposes its MCP endpoints through environment variables, so
-this adapter can build exact ``(server URL, wire tool name)`` grants without importing
-application code or changing the integration contract.  ``AGENTIC_GOV_DENY_TOOLS`` is
-a demo-only, comma-separated subtraction from these grants; it is empty by default.
-"""
+"""Governance-owned global least-privilege grants loaded from policy data."""
 
 from __future__ import annotations
 
@@ -12,18 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import os
 
-
-RAG_WIRE_TOOLS = frozenset({"searchPolicies"})
-DB_WIRE_TOOLS = frozenset(
-    {
-        "insertClaim",
-        "updateClaimStatus",
-        "executeQuery",
-        "getClaimSchema",
-        "insertAuditLog",
-    }
-)
-CURRENCY_WIRE_TOOLS = frozenset({"convertCurrency"})
+from agentic_governance.adapters.policy_loader import LoadedPolicy, load_policy
 
 
 @dataclass(frozen=True)
@@ -34,23 +17,26 @@ class ToolAllowlistConfig:
     demo_denied_tools: frozenset[str] = frozenset()
 
     @classmethod
-    def from_environment(cls, environ: Mapping[str, str] | None = None) -> "ToolAllowlistConfig":
+    def from_environment(
+        cls, environ: Mapping[str, str] | None = None
+    ) -> "ToolAllowlistConfig":
         env = os.environ if environ is None else environ
-        server_tools = (
-            (env.get("RAG_MCP_URL", "http://mcp-rag:8000/mcp/"), RAG_WIRE_TOOLS),
-            (env.get("DB_MCP_URL", "http://mcp-db:8000/mcp/"), DB_WIRE_TOOLS),
-            (env.get("CURRENCY_MCP_URL", "http://mcp-currency:8000/mcp/"), CURRENCY_WIRE_TOOLS),
-        )
+        return cls.from_policy(load_policy(env), env)
+
+    @classmethod
+    def from_policy(
+        cls,
+        policy: LoadedPolicy,
+        environ: Mapping[str, str] | None = None,
+    ) -> "ToolAllowlistConfig":
+        env = os.environ if environ is None else environ
         demo_denied = frozenset(
             name.strip()
             for name in env.get("AGENTIC_GOV_DENY_TOOLS", "").split(",")
             if name.strip()
         )
         allowed = frozenset(
-            (server_url, tool_name)
-            for server_url, tool_names in server_tools
-            for tool_name in tool_names
-            if tool_name not in demo_denied
+            pair for pair in policy.allowed_pairs if pair[1] not in demo_denied
         )
         return cls(allowed_pairs=allowed, demo_denied_tools=demo_denied)
 

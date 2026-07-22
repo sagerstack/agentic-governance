@@ -56,10 +56,11 @@ async def test_allowlisted_pair_is_auto_executed_and_audited_before_dispatch(
     audit_sink = MemoryAuditSink(order)
     governed = install(real_mcp_call_tool=real_mcp_call_tool, audit_sink=audit_sink, **providers)
 
-    result = await governed("http://db", "insertClaim", {"amount": 42})
+    arguments = {"employeeId": "emp-123", "amount": 42}
+    result = await governed("http://db", "insertClaim", arguments)
 
     assert result == {"claimId": "c1"}
-    real_mcp_call_tool.assert_awaited_once_with("http://db", "insertClaim", {"amount": 42})
+    real_mcp_call_tool.assert_awaited_once_with("http://db", "insertClaim", arguments)
     assert order == ["audit", "execute"]
     entry = audit_sink.entries[0]
     assert entry["disposition"]["decision"] == "Auto-Execute"

@@ -7,6 +7,7 @@
 
 ## Versions
 
+- **0.4.0** — Slice 3 (unified configurable policy table + envelope integrity + independently staged control modes)
 - **0.3.1** — Added environment-driven mandate-revocation and forced-identity demo toggles
 - **0.3.0** — Slice 2 (verified agent identities + machine-readable per-identity mandates)
 - **0.2.2** — Audit `policyVersion` now reports the package version (removed internal slice labels from runtime data)

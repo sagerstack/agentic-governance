@@ -56,10 +56,21 @@ async def test_permitted_identity_mandates_execute(
         **_providers(identity),
     )
 
-    result = await governed(server, tool, {})
+    if identity == "application" and tool == "insertClaim":
+        arguments = {
+            "employeeId": "emp-123",
+            "status": "draft",
+            "totalAmount": 0,
+            "currency": "SGD",
+        }
+    elif tool == "insertClaim":
+        arguments = {"employeeId": "emp-123"}
+    else:
+        arguments = {}
+    result = await governed(server, tool, arguments)
 
     assert result == {"ok": True}
-    real_mcp_call_tool.assert_awaited_once_with(server, tool, {})
+    real_mcp_call_tool.assert_awaited_once_with(server, tool, arguments)
     disposition = audit_sink.entries[0]["disposition"]
     assert disposition["decision"] == "Auto-Execute"
     controls = {control["controlId"]: control["result"] for control in disposition["firedControls"]}

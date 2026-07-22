@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "servers": {
+    "rag": {"env": "RAG_MCP_URL", "default": "http://mcp-rag:8000/mcp/"},
+    "db": {"env": "DB_MCP_URL", "default": "http://mcp-db:8000/mcp/"},
+    "currency": {"env": "CURRENCY_MCP_URL", "default": "http://mcp-currency:8000/mcp/"}
+  },
+  "controls": {
+    "A5": {"name": "allowlist", "modeEnv": "AGENTIC_GOV_ENABLE_ALLOWLIST", "defaultMode": "enforce"},
+    "A3": {"name": "identity", "modeEnv": "AGENTIC_GOV_ENABLE_IDENTITY", "defaultMode": "enforce"},
+    "A4": {"name": "mandate", "modeEnv": "AGENTIC_GOV_ENABLE_MANDATE", "defaultMode": "enforce"},
+    "A2": {"name": "integrity", "modeEnv": "AGENTIC_GOV_ENABLE_INTEGRITY", "defaultMode": "enforce"},
+    "A12": {"name": "fail-closed-floor", "modeEnv": "AGENTIC_GOV_ENABLE_FAIL_CLOSED", "defaultMode": "enforce"}
+  },
+  "allowlist": [
+    {"server": "rag", "tools": ["searchPolicies"]},
+    {"server": "db", "tools": ["insertClaim", "updateClaimStatus", "executeQuery", "getClaimSchema", "insertAuditLog"]},
+    {"server": "currency", "tools": ["convertCurrency"]}
+  ],
+  "identities": [
+    {"id": "intake", "role": "claim-intake-agent", "dept": "claims"},
+    {"id": "compliance", "role": "policy-compliance-agent", "dept": "risk"},
+    {"id": "fraud", "role": "fraud-detection-agent", "dept": "risk"},
+    {"id": "advisor", "role": "claim-advisor-agent", "dept": "claims"},
+    {"id": "humanEscalation", "role": "human-escalation-workflow", "dept": "claims"},
+    {"id": "markAiReviewed", "role": "review-status-workflow", "dept": "claims"},
+    {"id": "application", "role": "web-application", "dept": "platform"}
+  ],
+  "mandates": {
+    "intake": [
+      {"server": "db", "tools": ["getClaimSchema", "insertClaim", "insertAuditLog"]},
+      {"server": "rag", "tools": ["searchPolicies"]},
+      {"server": "currency", "tools": ["convertCurrency"]}
+    ],
+    "compliance": [
+      {"server": "rag", "tools": ["searchPolicies"]},
+      {"server": "db", "tools": ["insertAuditLog"]}
+    ],
+    "fraud": [{"server": "db", "tools": ["executeQuery", "insertAuditLog"]}],
+    "advisor": [
+      {"server": "rag", "tools": ["searchPolicies"]},
+      {"server": "db", "tools": ["updateClaimStatus", "insertAuditLog"]}
+    ],
+    "humanEscalation": [{"server": "db", "tools": ["updateClaimStatus"]}],
+    "markAiReviewed": [{"server": "db", "tools": ["updateClaimStatus"]}],
+    "application": [{"server": "db", "tools": ["insertClaim", "executeQuery", "insertAuditLog"]}]
+  },
+  "integrityRules": [
+    {
+      "server": "db",
+      "tool": "insertClaim",
+      "identities": ["application"],
+      "checks": [
+        {"declared": "employeeId", "trusted": "employeeId", "operator": "exact", "required": true},
+        {"declared": "status", "constant": "draft", "operator": "exact", "required": true},
+        {"declared": "totalAmount", "constant": 0, "operator": "decimal", "absoluteTolerance": "0.00", "required": true},
+        {"declared": "currency", "constant": "SGD", "operator": "currency", "required": true}
+      ]
+    },
+    {
+      "server": "db",
+      "tool": "insertClaim",
+      "identities": ["intake"],
+      "checks": [
+        {"declared": "employeeId", "trusted": "employeeId", "operator": "exact", "required": true}
+      ]
+    },
+    {
+      "server": "db",
+      "tool": "updateClaimStatus",
+      "identities": ["advisor", "humanEscalation", "markAiReviewed"],
+      "checks": [
+        {"declared": "claimId", "trusted": "dbClaimId", "operator": "integer", "required": true}
+      ]
+    }
+  ]
+}

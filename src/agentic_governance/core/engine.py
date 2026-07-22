@@ -22,6 +22,7 @@ class GovernanceEngine:
             decision=disposition.decision,
             reasons=disposition.reasons,
             fired_controls=fired,
+            control_states=disposition.control_states,
             policy_version=disposition.policy_version,
             latency_ms=latency_ms,
         )

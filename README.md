@@ -81,9 +81,11 @@ assertion, and the gateway/hybrid deployment pattern.
 - **Slice 2 — verified identity + mandate (A3/A4):** seven trusted service identities
   receive exact per-identity MCP capabilities; missing/unknown identities and
   out-of-mandate calls are denied before dispatch.
+- **Slice 3 — envelope integrity (A2):** config-defined comparisons bind draft/final
+  submissions to trusted employee identity and status updates to the trusted database
+  claim id. Missing/mismatched required facts are denied before dispatch.
 
-Remaining Group A slices: envelope integrity (A2),
-exposure/rate/evidence knobs (A7/A8/A9), input hardening (A10). See
+Remaining Group A slices: exposure/rate/evidence knobs (A7/A8/A9), input hardening (A10). See
 `docs/plan/group-a-poc-plan.md`.
 
 ---
@@ -130,15 +132,18 @@ governed_call = install(
     extracted_receipt_provider = lambda: ...,      # trusted extracted/domain state (optional)
     session_claim_id_provider  = lambda: ...,      # trusted session/correlation id
     node_identity_provider     = lambda: ...,      # which agent/node is acting
+    db_claim_id_provider       = lambda: ...,      # optional trusted DB id; defaults to None
     # engine / audit_sink / identity_registry / mandate_store are optional overrides
 )
 # returns: async governedMcpCallTool(serverUrl, toolName, arguments)
 ```
 
 The providers supply **trusted context** — data the agent cannot forge because it is set
-upstream (session, framework state), never from the agent's own tool arguments. The
-governance decision is made from this trusted context; the agent's arguments are recorded
-but treated as untrusted claims to be verified.
+upstream (session, framework state), never from the agent's own tool arguments. Internally
+the exact trusted keys are `employeeId`, `extractedReceipt`, `sessionClaimId`, and
+`dbClaimId`; current A2 rules read `employeeId` and `dbClaimId`. The governance decision
+is made from raw in-memory context; only redacted/hash references enter audit. The agent's
+arguments are treated as untrusted claims to be verified.
 
 ### Onboarding steps
 
@@ -161,13 +166,33 @@ it in Docker).
 
 ## Runtime configuration
 
-- **Least-privilege allowlist** — governance-owned in
-  `agentic_governance.adapters.tool_allowlist`; MCP server URLs are read from
-  `RAG_MCP_URL`, `DB_MCP_URL`, `CURRENCY_MCP_URL` (with sensible defaults).
+- **Unified policy table** — the bundled schema-v1 policy is
+  `src/agentic_governance/policy/default_policy.json`. It defines symbolic servers,
+  global allowlist, verified identities, mandates, integrity rules, and control metadata.
+  Server symbols resolve through `RAG_MCP_URL`, `DB_MCP_URL`, and `CURRENCY_MCP_URL`.
+  Replace the complete policy without code changes using
+  `AGENTIC_GOV_POLICY_FILE=/path/to/policy.json`; invalid/incomplete policy fails startup
+  closed.
 - **Verified identities** — the integration must supply one of `intake`, `compliance`,
   `fraud`, `advisor`, `humanEscalation`, `markAiReviewed`, or `application`. Web/UI/SSE
   calls outside graph nodes must use `application`; null or unknown identities are
   denied as `unverified-identity`.
+- **Independent control modes** — each defaults to `enforce`. Values are
+  case-insensitive: `true|1|on|enforce` → enforce, `observe` → shadow evaluation without
+  blocking, and `false|0|off` → skip. Invalid values warning-log and safely default to
+  enforce. Audit `controlStates` records `{controlId, mode, outcome}` independently of
+  backward-compatible `firedControls`.
+  ```bash
+  AGENTIC_GOV_ENABLE_ALLOWLIST=enforce    # A5
+  AGENTIC_GOV_ENABLE_IDENTITY=enforce     # A3
+  AGENTIC_GOV_ENABLE_MANDATE=enforce      # A4
+  AGENTIC_GOV_ENABLE_INTEGRITY=observe    # A2; use shadow mode for first deployment
+  AGENTIC_GOV_ENABLE_FAIL_CLOSED=enforce  # A12
+  ```
+  **Warning:** setting `AGENTIC_GOV_ENABLE_FAIL_CLOSED=off` removes the high-impact
+  governance-unavailable safety net. The audit sink is always on and has no disable flag.
+  Future controls follow `AGENTIC_GOV_ENABLE_<CONTROL>` (EXPOSURE, RATE, EVIDENCE,
+  SCHEMA).
 - **Demo/testing toggles** — all are read once at governance runtime initialization
   and default to empty/off:
   ```bash
@@ -179,12 +204,16 @@ it in Docker).
 
   # Override trusted identity for every governed call (demo/testing only).
   AGENTIC_GOV_FORCE_IDENTITY="fraud"       # or an unknown id such as "attacker"
+
+  # Force configured A2 comparisons to report a mismatch.
+  AGENTIC_GOV_SIMULATE_TAMPER="insertClaim:employeeId,updateClaimStatus:claimId"
   ```
   Revocation entries are comma-separated `identity:wireTool` pairs; surrounding
   whitespace is trimmed and malformed/unknown pairs are logged and skipped. A forced
   registered identity undergoes its normal mandate check, while a forced unknown
-  identity is denied as `unverified-identity`. When unset, trusted identity derivation
-  is unchanged.
+  identity is denied as `unverified-identity`. Tamper entries are comma-separated
+  `wireTool:declaredField` pairs. When unset, trusted identity and integrity evaluation
+  are unchanged.
 - **Audit** — each run writes a new file `./.agentic_governance/audit-<UTC>-<hex>.jsonl`
   (previous runs preserved). Sensitive values are stored as SHA-256 hashes; raw payloads
   never enter the log. Passing an explicit `.jsonl` path to `JsonlAuditSink` overrides the
@@ -202,4 +231,4 @@ pytest
 ## Versioning
 
 Semantic-ish: **+minor per slice**, **+major per completed group**, patch for fixes.
-Current: **0.3.1**. See `CHANGELOG.md`.
+Current: **0.4.0**. See `CHANGELOG.md`.

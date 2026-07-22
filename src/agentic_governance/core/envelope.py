@@ -30,6 +30,8 @@ class GovernanceEnvelope:
     tool_name: str
     mcp_server: str
     params_ref: dict[str, Any]
+    declared_params: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+    trusted_context: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
     action_trace: tuple[Any, ...] = ()
     context_metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -42,6 +44,8 @@ class GovernanceEnvelope:
         data["toolName"] = data.pop("tool_name")
         data["mcpServer"] = data.pop("mcp_server")
         data["paramsRef"] = data.pop("params_ref")
+        data.pop("declared_params", None)
+        data.pop("trusted_context", None)
         data["actionTrace"] = data.pop("action_trace")
         data["contextMetadata"] = data.pop("context_metadata")
         return data
@@ -56,6 +60,7 @@ def build_envelope(
     extracted_receipt: Any,
     session_claim_id: str | None,
     node_identity: str | None,
+    db_claim_id: Any = None,
 ) -> GovernanceEnvelope:
     correlation_id = session_claim_id or _stable_hash({"employeeId": employee_id, "toolName": tool_name})
     metadata = {
@@ -82,6 +87,13 @@ def build_envelope(
         tool_name=tool_name,
         mcp_server=server_url,
         params_ref=redact_params(arguments or {}),
+        declared_params=dict(arguments or {}),
+        trusted_context={
+            "employeeId": employee_id,
+            "extractedReceipt": extracted_receipt,
+            "sessionClaimId": session_claim_id,
+            "dbClaimId": db_claim_id,
+        },
         context_metadata=metadata,
     )
 

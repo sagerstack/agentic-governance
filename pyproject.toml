@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentic-governance"
-version = "0.3.1"
+version = "0.4.0"
 description = "App-agnostic runtime governance layer"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,3 +26,6 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+agentic_governance = ["policy/*.json"]

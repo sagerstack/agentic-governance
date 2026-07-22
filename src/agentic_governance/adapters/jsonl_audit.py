@@ -54,6 +54,14 @@ def build_audit_entry(envelope: GovernanceEnvelope, disposition: Disposition) ->
                 }
                 for control in disposition.fired_controls
             ],
+            "controlStates": [
+                {
+                    "controlId": state.control_id,
+                    "mode": state.mode,
+                    "outcome": state.outcome,
+                }
+                for state in disposition.control_states
+            ],
             "policyVersion": disposition.policy_version,
             "latencyMs": disposition.latency_ms,
         },

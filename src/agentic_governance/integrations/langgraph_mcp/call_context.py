@@ -14,6 +14,7 @@ class TrustedStateProviders:
     extracted_receipt_provider: Provider
     session_claim_id_provider: Provider
     node_identity_provider: Provider
+    db_claim_id_provider: Provider
 
     def build_envelope(self, server_url: str, tool_name: str, arguments: dict[str, Any] | None) -> GovernanceEnvelope:
         return build_envelope(
@@ -24,4 +25,5 @@ class TrustedStateProviders:
             extracted_receipt=self.extracted_receipt_provider(),
             session_claim_id=self.session_claim_id_provider(),
             node_identity=self.node_identity_provider(),
+            db_claim_id=self.db_claim_id_provider(),
         )

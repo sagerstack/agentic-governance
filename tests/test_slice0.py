@@ -78,7 +78,13 @@ async def test_normal_mode_does_not_block_high_impact_calls(providers):
     audit_sink = MemoryAuditSink()
     governed = install(real_mcp_call_tool=real_mcp_call_tool, audit_sink=audit_sink, **providers)
 
-    result = await governed("http://db", "insertClaim", {"amount": 42, "currency": "SGD"})
+    arguments = {
+        "employeeId": "emp-123",
+        "status": "draft",
+        "totalAmount": 0,
+        "currency": "SGD",
+    }
+    result = await governed("http://db", "insertClaim", arguments)
 
     assert result == {"claimId": "c1"}
     real_mcp_call_tool.assert_awaited_once()

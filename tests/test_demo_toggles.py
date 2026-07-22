@@ -51,11 +51,14 @@ async def test_revoke_grant_denies_only_the_selected_identity_tool(
     )
 
     denied = await governed("http://rag", "searchPolicies", {"query": "meals"})
-    allowed = await governed("http://db", "insertClaim", {})
+    insert_arguments = {"employeeId": "emp-123"}
+    allowed = await governed("http://db", "insertClaim", insert_arguments)
 
     assert denied == {"error": "mandate-violation", "decision": "Deny"}
     assert allowed == {"ok": True}
-    real_mcp_call_tool.assert_awaited_once_with("http://db", "insertClaim", {})
+    real_mcp_call_tool.assert_awaited_once_with(
+        "http://db", "insertClaim", insert_arguments
+    )
     denied_disposition = audit_sink.entries[0]["disposition"]
     controls = {
         control["controlId"]: control["result"]
@@ -139,7 +142,7 @@ async def test_demo_toggles_default_off_preserves_trusted_identity(
         **_providers("intake"),
     )
 
-    result = await governed("http://db", "insertClaim", {})
+    result = await governed("http://db", "insertClaim", {"employeeId": "emp-123"})
 
     assert result == {"ok": True}
     assert audit_sink.entries[0]["agentIdentity"]["id"] == "intake"

@@ -25,5 +25,7 @@ class InMemoryMandateStore:
     def __init__(self, config: IdentityMandateConfig | None = None) -> None:
         self._config = config or IdentityMandateConfig.from_environment()
 
-    async def mandate_for(self, identity: str) -> Mandate:
-        return self._config.mandates[identity]
+    async def mandate_for(self, identity: str | None) -> Mandate | None:
+        if identity is None:
+            return None
+        return self._config.mandates.get(identity)
