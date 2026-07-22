@@ -168,10 +168,23 @@ it in Docker).
   `fraud`, `advisor`, `humanEscalation`, `markAiReviewed`, or `application`. Web/UI/SSE
   calls outside graph nodes must use `application`; null or unknown identities are
   denied as `unverified-identity`.
-- **Demo deny toggle** — subtract normally-allowed tools without any app change:
+- **Demo/testing toggles** — all are read once at governance runtime initialization
+  and default to empty/off:
   ```bash
-  AGENTIC_GOV_DENY_TOOLS="convertCurrency"   # comma-separated wire tool names; empty by default
+  # Subtract wire tools from the global A5 allowlist.
+  AGENTIC_GOV_DENY_TOOLS="convertCurrency"
+
+  # Subtract exact identity:wireTool capabilities from A4 mandates.
+  AGENTIC_GOV_REVOKE_GRANTS="intake:searchPolicies,advisor:updateClaimStatus"
+
+  # Override trusted identity for every governed call (demo/testing only).
+  AGENTIC_GOV_FORCE_IDENTITY="fraud"       # or an unknown id such as "attacker"
   ```
+  Revocation entries are comma-separated `identity:wireTool` pairs; surrounding
+  whitespace is trimmed and malformed/unknown pairs are logged and skipped. A forced
+  registered identity undergoes its normal mandate check, while a forced unknown
+  identity is denied as `unverified-identity`. When unset, trusted identity derivation
+  is unchanged.
 - **Audit** — each run writes a new file `./.agentic_governance/audit-<UTC>-<hex>.jsonl`
   (previous runs preserved). Sensitive values are stored as SHA-256 hashes; raw payloads
   never enter the log. Passing an explicit `.jsonl` path to `JsonlAuditSink` overrides the
@@ -189,4 +202,4 @@ pytest
 ## Versioning
 
 Semantic-ish: **+minor per slice**, **+major per completed group**, patch for fixes.
-Current: **0.3.0**. See `CHANGELOG.md`.
+Current: **0.3.1**. See `CHANGELOG.md`.

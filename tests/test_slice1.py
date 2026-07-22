@@ -28,6 +28,8 @@ def policy_environment(monkeypatch):
     monkeypatch.setenv("DB_MCP_URL", "http://db")
     monkeypatch.setenv("CURRENCY_MCP_URL", "http://currency")
     monkeypatch.delenv("AGENTIC_GOV_DENY_TOOLS", raising=False)
+    monkeypatch.delenv("AGENTIC_GOV_REVOKE_GRANTS", raising=False)
+    monkeypatch.delenv("AGENTIC_GOV_FORCE_IDENTITY", raising=False)
 
 
 @pytest.fixture

@@ -3,6 +3,10 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from agentic_governance.adapters.identity_mandates import (
+    DemoIdentityOverrideConfig,
+    IdentityMandateConfig,
+)
 from agentic_governance.adapters.inmemory_registry import InMemoryIdentityRegistry, InMemoryMandateStore
 from agentic_governance.adapters.jsonl_audit import JsonlAuditSink
 from agentic_governance.adapters.pdp_python import DeterministicPolicyDecisionPoint
@@ -34,8 +38,13 @@ class _GovernedMcpRuntime:
         self._providers = providers
         self._engine = engine or GovernanceEngine(DeterministicPolicyDecisionPoint())
         self._audit_sink = audit_sink or JsonlAuditSink("./.agentic_governance/")
-        self._identity_registry = identity_registry or InMemoryIdentityRegistry()
-        self._mandate_store = mandate_store or InMemoryMandateStore()
+        identity_mandate_config = IdentityMandateConfig.from_environment()
+        self._identity_registry = identity_registry or InMemoryIdentityRegistry(
+            identity_mandate_config
+        )
+        self._mandate_store = mandate_store or InMemoryMandateStore(
+            identity_mandate_config
+        )
         self._pending_audit_events: list[tuple[GovernanceEnvelope, Disposition]] = []
 
     async def call(self, serverUrl: str, toolName: str, arguments: dict[str, Any] | None) -> Any:
@@ -209,11 +218,18 @@ def install(
     mandate_store: Any | None = None,
 ) -> Callable[[str, str, dict[str, Any] | None], Awaitable[Any]]:
     global _RUNTIME
+    demo_identity_override = DemoIdentityOverrideConfig.from_environment()
+
+    def effective_node_identity_provider() -> Any:
+        if demo_identity_override.forced_identity is not None:
+            return demo_identity_override.forced_identity
+        return node_identity_provider()
+
     providers = TrustedStateProviders(
         employee_id_provider=employee_id_provider,
         extracted_receipt_provider=extracted_receipt_provider,
         session_claim_id_provider=session_claim_id_provider,
-        node_identity_provider=node_identity_provider,
+        node_identity_provider=effective_node_identity_provider,
     )
     _RUNTIME = _GovernedMcpRuntime(
         real_mcp_call_tool=real_mcp_call_tool,
