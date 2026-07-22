@@ -54,7 +54,16 @@ def _providers(*, identity="intake", employee="emp-123", session="session-456", 
 
 
 def _claim(amount):
-    return {"employeeId": "emp-123", "totalAmount": amount}
+    return {"employeeId": "emp-123", "status": "pending", "totalAmount": amount}
+
+
+def _escalation(reason):
+    return {
+        "error": reason,
+        "decision": "Escalate",
+        "reason": reason,
+        "escalation": {"source": "governance", "reason": reason},
+    }
 
 
 def _override_policy(tmp_path, mutate):
@@ -92,18 +101,24 @@ async def test_below_all_thresholds_auto_executes(policy_environment):
     ],
 )
 async def test_per_action_exposure_dispositions(
-    policy_environment, amount, decision, outcome
+    policy_environment, monkeypatch, amount, decision, outcome
 ):
+    if amount is None:
+        monkeypatch.setenv("AGENTIC_GOV_ENABLE_SCHEMA", "off")
     real = AsyncMock()
     audit = MemoryAuditSink()
     governed = install(real_mcp_call_tool=real, audit_sink=audit, **_providers())
-    arguments = {"employeeId": "emp-123"}
+    arguments = {"employeeId": "emp-123", "status": "pending"}
     if amount is not None:
         arguments["totalAmount"] = amount
 
     result = await governed("http://db", "insertClaim", arguments)
 
-    assert result == {"error": "exposure-exceeded", "decision": decision}
+    assert result == (
+        _escalation("exposure-exceeded")
+        if decision == "Escalate"
+        else {"error": "exposure-exceeded", "decision": "Deny"}
+    )
     real.assert_not_awaited()
     state = next(s for s in audit.entries[0]["disposition"]["controlStates"] if s["controlId"] == "A7")
     assert state["outcome"] == outcome
@@ -125,8 +140,8 @@ async def test_aggregate_exposure_escalates_and_does_not_reserve_blocked_action(
 
     assert results[:4] == [{"ok": True}] * 4
     assert results[4:] == [
-        {"error": "exposure-exceeded", "decision": "Escalate"},
-        {"error": "exposure-exceeded", "decision": "Escalate"},
+        _escalation("exposure-exceeded"),
+        _escalation("exposure-exceeded"),
     ]
     assert real.await_count == 4
     aggregate_states = [
@@ -164,7 +179,7 @@ async def test_weak_or_missing_evidence_escalates(policy_environment, receipt):
 
     result = await governed("http://db", "insertClaim", _claim(100))
 
-    assert result == {"error": "evidence-insufficient", "decision": "Escalate"}
+    assert result == _escalation("evidence-insufficient")
     real.assert_not_awaited()
     state = next(s for s in audit.entries[0]["disposition"]["controlStates"] if s["controlId"] == "A9")
     assert state["outcome"] in {"missing-evidence", "confidence-below-threshold"}
@@ -274,10 +289,9 @@ async def test_evidence_threshold_is_configurable(
         **_providers(receipt=_receipt(0.90)),
     )
 
-    assert await governed("http://db", "insertClaim", _claim(10)) == {
-        "error": "evidence-insufficient",
-        "decision": "Escalate",
-    }
+    assert await governed("http://db", "insertClaim", _claim(10)) == _escalation(
+        "evidence-insufficient"
+    )
 
 
 @pytest.mark.asyncio
@@ -293,10 +307,9 @@ async def test_rate_disposition_is_configurable_to_escalate(
     governed = install(real_mcp_call_tool=real, audit_sink=MemoryAuditSink(), **_providers())
 
     assert await governed("http://db", "insertClaim", _claim(1)) == {"ok": True}
-    assert await governed("http://db", "insertClaim", _claim(1)) == {
-        "error": "rate-exceeded",
-        "decision": "Escalate",
-    }
+    assert await governed("http://db", "insertClaim", _claim(1)) == _escalation(
+        "rate-exceeded"
+    )
     assert real.await_count == 1
 
 
@@ -318,7 +331,7 @@ async def test_aggregate_exposure_reservation_is_atomic_under_concurrency(
 
     assert sum(result == {"ok": True} for result in results) == 3
     assert sum(
-        result == {"error": "exposure-exceeded", "decision": "Escalate"}
+        result == _escalation("exposure-exceeded")
         for result in results
     ) == 2
     assert real.await_count == 3

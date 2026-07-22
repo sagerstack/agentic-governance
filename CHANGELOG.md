@@ -7,6 +7,7 @@
 
 ## Versions
 
+- **0.6.0** — Slice 5 (trusted-server and typed input hardening + structured governance escalation handoff)
 - **0.5.0** — Slice 4 (configurable exposure, rate, and receipt-evidence disposition controls)
 - **0.4.0** — Slice 3 (unified configurable policy table + envelope integrity + independently staged control modes)
 - **0.3.1** — Added environment-driven mandate-revocation and forced-identity demo toggles

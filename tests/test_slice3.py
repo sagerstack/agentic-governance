@@ -28,6 +28,7 @@ def _set_servers(monkeypatch):
     monkeypatch.setenv("RAG_MCP_URL", "http://rag")
     monkeypatch.setenv("DB_MCP_URL", "http://db")
     monkeypatch.setenv("CURRENCY_MCP_URL", "http://currency")
+    monkeypatch.setenv("AGENTIC_GOV_ENABLE_SCHEMA", "off")
     monkeypatch.setenv("AGENTIC_GOV_ENABLE_EXPOSURE", "off")
     monkeypatch.setenv("AGENTIC_GOV_ENABLE_RATE", "off")
     monkeypatch.setenv("AGENTIC_GOV_ENABLE_EVIDENCE", "off")
@@ -340,6 +341,18 @@ async def test_full_policy_file_override_changes_behavior(monkeypatch, tmp_path)
     document = json.loads(default_path.read_text(encoding="utf-8"))
     document["allowlist"][1]["tools"].append("customRead")
     document["mandates"]["application"][0]["tools"].append("customRead")
+    document["schemas"].append(
+        {
+            "server": "db",
+            "tool": "customRead",
+            "schema": {
+                "type": "object",
+                "required": [],
+                "additionalProperties": False,
+                "properties": {},
+            },
+        }
+    )
     override = tmp_path / "policy.json"
     override.write_text(json.dumps(document), encoding="utf-8")
     monkeypatch.setenv("AGENTIC_GOV_POLICY_FILE", str(override))

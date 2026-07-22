@@ -35,6 +35,12 @@ class JsonlAuditSink:
 
 
 def build_audit_entry(envelope: GovernanceEnvelope, disposition: Disposition) -> dict[str, Any]:
+    escalation = None
+    if disposition.decision == "Escalate":
+        escalation = {
+            "source": "governance",
+            "reason": disposition.reasons[0] if disposition.reasons else "escalated",
+        }
     return {
         "entryId": str(uuid4()),
         "envelope": envelope.to_dict(),
@@ -62,6 +68,7 @@ def build_audit_entry(envelope: GovernanceEnvelope, disposition: Disposition) ->
                 }
                 for state in disposition.control_states
             ],
+            "escalation": escalation,
             "policyVersion": disposition.policy_version,
             "latencyMs": disposition.latency_ms,
         },

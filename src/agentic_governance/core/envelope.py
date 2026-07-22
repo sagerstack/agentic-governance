@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -30,7 +31,7 @@ class GovernanceEnvelope:
     tool_name: str
     mcp_server: str
     params_ref: dict[str, Any]
-    declared_params: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
+    declared_params: Any = field(default_factory=dict, repr=False, compare=False)
     trusted_context: dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
     action_trace: tuple[Any, ...] = ()
     context_metadata: dict[str, Any] = field(default_factory=dict)
@@ -55,7 +56,7 @@ def build_envelope(
     *,
     server_url: str,
     tool_name: str,
-    arguments: dict[str, Any] | None,
+    arguments: Any,
     employee_id: str | None,
     extracted_receipt: Any,
     session_claim_id: str | None,
@@ -86,8 +87,10 @@ def build_envelope(
         action_type="mcp_call",
         tool_name=tool_name,
         mcp_server=server_url,
-        params_ref=redact_params(arguments or {}),
-        declared_params=dict(arguments or {}),
+        params_ref=redact_params(arguments if arguments is not None else {}),
+        declared_params=(
+            dict(arguments) if isinstance(arguments, Mapping) else arguments
+        ),
         trusted_context={
             "employeeId": employee_id,
             "extractedReceipt": extracted_receipt,

@@ -14,6 +14,7 @@ from typing import Any
 
 from agentic_governance.core.integrity import IntegrityCheck, IntegrityRule
 from agentic_governance.core.quantitative import EvidenceRule, ExposureRule, RateRule
+from agentic_governance.core.schema_validation import SchemaRule
 
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,9 @@ _REQUIRED_SECTIONS = {
     "schemaVersion",
     "servers",
     "controls",
+    "trustedServers",
     "allowlist",
+    "schemas",
     "identities",
     "mandates",
     "integrityRules",
@@ -30,7 +33,7 @@ _REQUIRED_SECTIONS = {
     "evidence",
 }
 _SUPPORTED_OPERATORS = {"exact", "currency", "integer", "decimal", "normalizedText"}
-_REQUIRED_CONTROLS = {"A2", "A3", "A4", "A5", "A7", "A8", "A9", "A12"}
+_REQUIRED_CONTROLS = {"A2", "A3", "A4", "A5", "A7", "A8", "A9", "A10", "A12"}
 _VALID_BREACH_DISPOSITIONS = {"Deny", "Escalate"}
 
 
@@ -50,6 +53,8 @@ class ControlSpec:
 class LoadedPolicy:
     servers: Mapping[str, str]
     allowed_pairs: frozenset[tuple[str, str]]
+    trusted_servers: frozenset[str]
+    schema_rules: tuple[SchemaRule, ...]
     identities: tuple[Mapping[str, str], ...]
     mandates: Mapping[str, frozenset[tuple[str, str]]]
     integrity_rules: tuple[IntegrityRule, ...]
@@ -93,6 +98,10 @@ def load_policy(environ: Mapping[str, str] | None = None) -> LoadedPolicy:
     identities = _load_identities(document["identities"])
     identity_ids = {record["id"] for record in identities}
     allowed_pairs = _load_pair_groups(document["allowlist"], servers, "allowlist")
+    trusted_servers = _load_trusted_servers(document["trustedServers"], servers)
+    schema_rules = _load_schema_rules(document["schemas"], servers, allowed_pairs)
+    if any(server_url not in trusted_servers for server_url, _ in allowed_pairs):
+        raise PolicyConfigError("every allowlisted server must be listed in trustedServers")
     mandates = _load_mandates(document["mandates"], servers, identity_ids)
     integrity_rules = _load_integrity_rules(
         document["integrityRules"], servers, identity_ids
@@ -104,6 +113,8 @@ def load_policy(environ: Mapping[str, str] | None = None) -> LoadedPolicy:
     return LoadedPolicy(
         servers=servers,
         allowed_pairs=allowed_pairs,
+        trusted_servers=trusted_servers,
+        schema_rules=schema_rules,
         identities=identities,
         mandates=mandates,
         integrity_rules=integrity_rules,
@@ -152,6 +163,96 @@ def _load_controls(raw: Any) -> dict[str, ControlSpec]:
             raise PolicyConfigError(f"control {control_id} has invalid defaultMode")
         controls[control_id] = ControlSpec(control_id, name, mode_env, default_mode)
     return controls
+
+
+def _load_trusted_servers(raw: Any, servers: Mapping[str, str]) -> frozenset[str]:
+    if not isinstance(raw, list) or not raw or not all(isinstance(item, str) for item in raw):
+        raise PolicyConfigError("trustedServers must be a non-empty string array")
+    if len(raw) != len(set(raw)) or not set(raw) <= set(servers):
+        raise PolicyConfigError("trustedServers contains duplicates or unknown symbols")
+    return frozenset(servers[symbol] for symbol in raw)
+
+
+def _load_schema_rules(
+    raw: Any,
+    servers: Mapping[str, str],
+    allowed_pairs: frozenset[tuple[str, str]],
+) -> tuple[SchemaRule, ...]:
+    if not isinstance(raw, list):
+        raise PolicyConfigError("schemas must be an array")
+    rules: list[SchemaRule] = []
+    seen: set[tuple[str, str]] = set()
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise PolicyConfigError(f"schemas[{index}] must be an object")
+        symbol, tool, schema = item.get("server"), item.get("tool"), item.get("schema")
+        if symbol not in servers or not isinstance(tool, str) or not tool:
+            raise PolicyConfigError(f"schemas[{index}] has invalid server/tool")
+        if not isinstance(schema, dict):
+            raise PolicyConfigError(f"schemas[{index}].schema must be an object")
+        pair = (servers[symbol], tool)
+        if pair in seen:
+            raise PolicyConfigError(f"duplicate schema for {symbol}:{tool}")
+        seen.add(pair)
+        _validate_schema_definition(schema, f"schemas[{index}].schema")
+        rules.append(SchemaRule(pair[0], pair[1], schema))
+    if seen != set(allowed_pairs):
+        missing = set(allowed_pairs) - seen
+        extra = seen - set(allowed_pairs)
+        raise PolicyConfigError(
+            f"schemas must exactly cover allowlist pairs; missing={sorted(missing)}, extra={sorted(extra)}"
+        )
+    return tuple(rules)
+
+
+def _validate_schema_definition(schema: Any, label: str) -> None:
+    if not isinstance(schema, dict):
+        raise PolicyConfigError(f"{label} must be an object")
+    supported_keywords = {
+        "type",
+        "required",
+        "additionalProperties",
+        "properties",
+        "items",
+        "enum",
+        "minimum",
+        "maximum",
+        "minLength",
+    }
+    unknown = set(schema) - supported_keywords
+    if unknown:
+        raise PolicyConfigError(f"{label} has unsupported keywords: {sorted(unknown)}")
+    raw_types = schema.get("type")
+    types = [raw_types] if isinstance(raw_types, str) else raw_types
+    supported_types = {"object", "array", "string", "number", "integer", "boolean", "null"}
+    if not isinstance(types, list) or not types or not all(item in supported_types for item in types):
+        raise PolicyConfigError(f"{label} has invalid type")
+    properties = schema.get("properties", {})
+    required = schema.get("required", [])
+    if "object" in types:
+        if not isinstance(properties, dict) or not all(isinstance(key, str) for key in properties):
+            raise PolicyConfigError(f"{label}.properties must be an object")
+        if not isinstance(required, list) or not all(isinstance(key, str) for key in required):
+            raise PolicyConfigError(f"{label}.required must be a string array")
+        if not set(required) <= set(properties):
+            raise PolicyConfigError(f"{label}.required references unknown properties")
+        if "additionalProperties" in schema and not isinstance(schema["additionalProperties"], bool):
+            raise PolicyConfigError(f"{label}.additionalProperties must be boolean")
+        for key, child in properties.items():
+            _validate_schema_definition(child, f"{label}.properties.{key}")
+    if "items" in schema:
+        if "array" not in types:
+            raise PolicyConfigError(f"{label}.items requires array type")
+        _validate_schema_definition(schema["items"], f"{label}.items")
+    if "enum" in schema and not isinstance(schema["enum"], list):
+        raise PolicyConfigError(f"{label}.enum must be an array")
+    if "minLength" in schema and (
+        not isinstance(schema["minLength"], int) or schema["minLength"] < 0
+    ):
+        raise PolicyConfigError(f"{label}.minLength must be a non-negative integer")
+    for keyword in ("minimum", "maximum"):
+        if keyword in schema:
+            _positive_decimal(schema[keyword], f"{label}.{keyword}", allow_zero=True)
 
 
 def _load_identities(raw: Any) -> tuple[Mapping[str, str], ...]:

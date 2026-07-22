@@ -44,6 +44,7 @@ def providers(monkeypatch):
     monkeypatch.delenv("AGENTIC_GOV_DENY_TOOLS", raising=False)
     monkeypatch.delenv("AGENTIC_GOV_REVOKE_GRANTS", raising=False)
     monkeypatch.delenv("AGENTIC_GOV_FORCE_IDENTITY", raising=False)
+    monkeypatch.setenv("AGENTIC_GOV_ENABLE_SCHEMA", "off")
     return {
         "employee_id_provider": lambda: "emp-123",
         "extracted_receipt_provider": lambda: {"merchant": "Cafe", "total": 42, "receipt": "SECRET-RECEIPT-PAYLOAD"},

@@ -87,8 +87,11 @@ assertion, and the gateway/hybrid deployment pattern.
 - **Slice 4 — quantitative dispositions (A7/A8/A9):** final intake submissions are
   governed by per-action/aggregate SGD exposure, atomic employee/session attempt rates,
   and required receipt evidence/confidence. Breaches deterministically Deny or Escalate.
+- **Slice 5 — input hardening + handoff (A10/A11):** exact trusted-server validation and
+  strict per-wire-tool argument schemas run before A5; Escalate returns a stable
+  governance-sourced handoff marker; structural tests assert action-auth independence.
 
-Remaining Group A slice: input hardening and Escalate handoff (A10/A11). See
+All six Group-A slices are implemented at v0.6.0 pending final verification. See
 `docs/plan/group-a-poc-plan.md`.
 
 ---
@@ -171,7 +174,8 @@ it in Docker).
 
 - **Unified policy table** — the bundled schema-v1 policy is
   `src/agentic_governance/policy/default_policy.json`. It defines symbolic servers,
-  global allowlist, verified identities, mandates, integrity rules, and control metadata.
+  trusted servers, strict tool schemas, global allowlist, verified identities, mandates,
+  integrity/quantitative rules, and control metadata.
   Server symbols resolve through `RAG_MCP_URL`, `DB_MCP_URL`, and `CURRENCY_MCP_URL`.
   Replace the complete policy without code changes using
   `AGENTIC_GOV_POLICY_FILE=/path/to/policy.json`; invalid/incomplete policy fails startup
@@ -193,11 +197,12 @@ it in Docker).
   AGENTIC_GOV_ENABLE_EXPOSURE=enforce     # A7
   AGENTIC_GOV_ENABLE_RATE=enforce         # A8
   AGENTIC_GOV_ENABLE_EVIDENCE=enforce     # A9
+  AGENTIC_GOV_ENABLE_SCHEMA=enforce       # A10 trusted server + typed arguments
   AGENTIC_GOV_ENABLE_FAIL_CLOSED=enforce  # A12
   ```
   **Warning:** setting `AGENTIC_GOV_ENABLE_FAIL_CLOSED=off` removes the high-impact
   governance-unavailable safety net. The audit sink is always on and has no disable flag.
-  Future controls follow `AGENTIC_GOV_ENABLE_<CONTROL>` (for example, SCHEMA).
+  Future controls follow `AGENTIC_GOV_ENABLE_<CONTROL>`.
 - **Demo/testing toggles** — all are read once at governance runtime initialization
   and default to empty/off:
   ```bash
@@ -226,8 +231,20 @@ it in Docker).
   requires receipt fields plus confidence ≥ **0.70** for merchant/date/total/currency.
   Application draft inserts are excluded. Override thresholds and breach dispositions
   with `AGENTIC_GOV_POLICY_FILE`. `Escalate` is audited and blocked from real tool
-  execution; app handoff is deferred to Slice 5. Reasons are `exposure-exceeded`,
-  `rate-exceeded`, and `evidence-insufficient`.
+  execution. Reasons are `exposure-exceeded`, `rate-exceeded`, and
+  `evidence-insufficient`.
+- **A10 trusted input boundary** — `trustedServers` resolves the exact rag/db/currency
+  endpoints; any other URL denies as `untrusted-server`. Every A5-allowlisted pair has a
+  strict schema in `schemas`; malformed/missing/wrong-type/extra fields deny as
+  `schema-invalid`. Unknown tools on trusted servers defer to A5 `tool-not-allowed`.
+- **Escalation handoff contract** — governance returns:
+  ```json
+  {"error":"exposure-exceeded","decision":"Escalate","reason":"exposure-exceeded",
+   "escalation":{"source":"governance","reason":"exposure-exceeded"}}
+  ```
+  The host app must route this exact marker to human review. It records governance
+  escalation metadata as `source="governance"` plus the exact reason; its pre-existing
+  validator/loop paths record `source="internal"` plus their internal reason.
 - **Audit** — each run writes a new file `./.agentic_governance/audit-<UTC>-<hex>.jsonl`
   (previous runs preserved). Sensitive values are stored as SHA-256 hashes; raw payloads
   never enter the log. Passing an explicit `.jsonl` path to `JsonlAuditSink` overrides the
@@ -245,4 +262,4 @@ pytest
 ## Versioning
 
 Semantic-ish: **+minor per slice**, **+major per completed group**, patch for fixes.
-Current: **0.5.0**. See `CHANGELOG.md`.
+Current: **0.6.0**. See `CHANGELOG.md`.

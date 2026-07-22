@@ -13,8 +13,10 @@
     "A7": {"name": "exposure", "modeEnv": "AGENTIC_GOV_ENABLE_EXPOSURE", "defaultMode": "enforce"},
     "A8": {"name": "rate", "modeEnv": "AGENTIC_GOV_ENABLE_RATE", "defaultMode": "enforce"},
     "A9": {"name": "evidence", "modeEnv": "AGENTIC_GOV_ENABLE_EVIDENCE", "defaultMode": "enforce"},
+    "A10": {"name": "input-schema-and-trusted-server", "modeEnv": "AGENTIC_GOV_ENABLE_SCHEMA", "defaultMode": "enforce"},
     "A12": {"name": "fail-closed-floor", "modeEnv": "AGENTIC_GOV_ENABLE_FAIL_CLOSED", "defaultMode": "enforce"}
   },
+  "trustedServers": ["rag", "db", "currency"],
   "allowlist": [
     {"server": "rag", "tools": ["searchPolicies"]},
     {"server": "db", "tools": ["insertClaim", "updateClaimStatus", "executeQuery", "getClaimSchema", "insertAuditLog"]},
@@ -48,6 +50,120 @@
     "markAiReviewed": [{"server": "db", "tools": ["updateClaimStatus"]}],
     "application": [{"server": "db", "tools": ["insertClaim", "executeQuery", "insertAuditLog"]}]
   },
+  "schemas": [
+    {
+      "server": "rag",
+      "tool": "searchPolicies",
+      "schema": {
+        "type": "object",
+        "required": ["query"],
+        "additionalProperties": false,
+        "properties": {
+          "query": {"type": "string", "minLength": 1},
+          "limit": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    {
+      "server": "currency",
+      "tool": "convertCurrency",
+      "schema": {
+        "type": "object",
+        "required": ["amount", "fromCurrency"],
+        "additionalProperties": false,
+        "properties": {
+          "amount": {"type": "number"},
+          "fromCurrency": {"type": "string", "minLength": 1},
+          "toCurrency": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    {
+      "server": "db",
+      "tool": "getClaimSchema",
+      "schema": {"type": "object", "required": [], "additionalProperties": false, "properties": {}}
+    },
+    {
+      "server": "db",
+      "tool": "executeQuery",
+      "schema": {
+        "type": "object",
+        "required": ["query"],
+        "additionalProperties": false,
+        "properties": {"query": {"type": "string", "minLength": 1}}
+      }
+    },
+    {
+      "server": "db",
+      "tool": "insertAuditLog",
+      "schema": {
+        "type": "object",
+        "required": ["claimId", "action", "newValue", "actor"],
+        "additionalProperties": false,
+        "properties": {
+          "claimId": {"type": "integer"},
+          "action": {"type": "string", "minLength": 1},
+          "newValue": {"type": "string"},
+          "actor": {"type": "string", "minLength": 1},
+          "oldValue": {"type": "string"}
+        }
+      }
+    },
+    {
+      "server": "db",
+      "tool": "updateClaimStatus",
+      "schema": {
+        "type": "object",
+        "required": ["claimId", "newStatus", "actor"],
+        "additionalProperties": false,
+        "properties": {
+          "claimId": {"type": "integer"},
+          "newStatus": {"type": "string", "minLength": 1},
+          "actor": {"type": "string", "minLength": 1},
+          "complianceFindings": {"type": ["object", "null"]},
+          "fraudFindings": {"type": ["object", "null"]},
+          "advisorDecision": {"type": ["string", "null"]},
+          "advisorFindings": {"type": ["object", "null"]},
+          "approvedBy": {"type": ["string", "null"]},
+          "category": {"type": ["string", "null"]}
+        }
+      }
+    },
+    {
+      "server": "db",
+      "tool": "insertClaim",
+      "schema": {
+        "type": "object",
+        "required": ["employeeId", "status", "totalAmount"],
+        "additionalProperties": false,
+        "properties": {
+          "employeeId": {"type": "string", "minLength": 1},
+          "status": {"type": "string", "minLength": 1},
+          "totalAmount": {"type": "number"},
+          "currency": {"type": ["string", "null"]},
+          "category": {"type": ["string", "null"]},
+          "intakeFindings": {"type": ["object", "null"]},
+          "claimNumber": {"type": ["string", "null"]},
+          "idempotencyKey": {"type": ["string", "null"]},
+          "receiptNumber": {"type": ["string", "null"]},
+          "merchant": {"type": ["string", "null"]},
+          "receiptDate": {"type": ["string", "null"]},
+          "receiptTotalAmount": {"type": ["number", "null"]},
+          "receiptCurrency": {"type": ["string", "null"]},
+          "lineItems": {"type": ["array", "null"]},
+          "imagePath": {"type": ["string", "null"]},
+          "paymentMethod": {"type": ["string", "null"]},
+          "taxAmount": {"type": ["number", "null"]},
+          "originalAmount": {"type": ["number", "null"]},
+          "originalCurrency": {"type": ["string", "null"]},
+          "convertedAmount": {"type": ["number", "null"]},
+          "convertedCurrency": {"type": ["string", "null"]},
+          "exchangeRate": {"type": ["number", "null"]},
+          "conversionDate": {"type": ["string", "null"]}
+        }
+      }
+    }
+  ],
   "exposure": [
     {
       "description": "POC placeholder thresholds; tune before production use",

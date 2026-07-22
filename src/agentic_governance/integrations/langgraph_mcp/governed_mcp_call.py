@@ -26,6 +26,7 @@ from agentic_governance.core.engine import GovernanceEngine
 from agentic_governance.core.envelope import GovernanceEnvelope
 from agentic_governance.core.integrity import IntegrityEvaluator
 from agentic_governance.core.quantitative import QuantitativeEvaluator
+from agentic_governance.core.schema_validation import SchemaValidator
 from agentic_governance.integrations.langgraph_mcp.call_context import TrustedStateProviders
 
 RealMcpCallTool = Callable[[str, str, dict[str, Any] | None], Awaitable[Any]]
@@ -74,11 +75,74 @@ class _GovernedMcpRuntime:
         )
         self._integrity_evaluator = IntegrityEvaluator()
         self._quantitative_evaluator = QuantitativeEvaluator()
+        self._schema_validator = SchemaValidator()
         self._counter_store = InMemoryCounterStore()
         self._pending_audit_events: list[tuple[GovernanceEnvelope, Disposition]] = []
 
     async def call(self, serverUrl: str, toolName: str, arguments: dict[str, Any] | None) -> Any:
         envelope = self._providers.build_envelope(serverUrl, toolName, arguments)
+
+        # A10 — reject rogue endpoints first, then validate known tool argument schemas.
+        schema_mode = self._control_modes.mode("A10")
+        pre_disposition = Disposition(
+            decision="Auto-Execute",
+            fired_controls=(
+                FiredControl(
+                    control_id="A6",
+                    name="deterministic-disposition",
+                    result="Auto-Execute",
+                ),
+            ),
+        )
+        if schema_mode == "off":
+            pre_disposition = self._add_skipped(pre_disposition, "A10")
+        else:
+            schema_evaluation = self._schema_validator.evaluate(
+                server_url=serverUrl,
+                tool_name=toolName,
+                arguments=arguments,
+                trusted_servers=self._policy.trusted_servers,
+                rules=self._policy.schema_rules,
+            )
+            if not schema_evaluation.trusted_server:
+                pre_disposition = self._apply_quantitative_result(
+                    pre_disposition,
+                    control_id="A10",
+                    name="input-schema-and-trusted-server",
+                    mode=schema_mode,
+                    breach_disposition="Deny",
+                    reason="untrusted-server",
+                    outcome="untrusted-server",
+                    observed_value=serverUrl,
+                )
+            elif schema_evaluation.schema_found and not schema_evaluation.valid:
+                pre_disposition = self._apply_quantitative_result(
+                    pre_disposition,
+                    control_id="A10",
+                    name="input-schema-and-trusted-server",
+                    mode=schema_mode,
+                    breach_disposition="Deny",
+                    reason="schema-invalid",
+                    outcome="schema-invalid",
+                    observed_value=list(schema_evaluation.errors),
+                )
+            elif schema_evaluation.schema_found:
+                pre_disposition = self._apply_control_result(
+                    pre_disposition,
+                    control_id="A10",
+                    name="input-schema-and-trusted-server",
+                    mode=schema_mode,
+                    allowed=True,
+                )
+            else:
+                pre_disposition = self._add_state(
+                    pre_disposition,
+                    ControlState("A10", schema_mode, "not-applicable"),
+                )
+        if pre_disposition.decision == "Deny":
+            return await self._record_and_dispatch(
+                envelope, pre_disposition, serverUrl, toolName, arguments
+            )
 
         # A5 — global exact server/tool allowlist.
         try:
@@ -87,6 +151,7 @@ class _GovernedMcpRuntime:
             return await self._handle_governance_unavailable(
                 envelope, serverUrl, toolName, arguments
             )
+        disposition = self._merge_pre_disposition(pre_disposition, disposition)
         if disposition.decision == "Deny":
             return await self._record_and_dispatch(
                 envelope, disposition, serverUrl, toolName, arguments
@@ -430,9 +495,17 @@ class _GovernedMcpRuntime:
         arguments: dict[str, Any] | None,
     ) -> Any:
         await self._record(envelope, disposition)
-        if disposition.decision in {"Deny", "Escalate"}:
-            reason = disposition.reasons[0] if disposition.reasons else disposition.decision.lower()
-            return {"error": reason, "decision": disposition.decision}
+        if disposition.decision == "Deny":
+            reason = disposition.reasons[0] if disposition.reasons else "denied"
+            return {"error": reason, "decision": "Deny"}
+        if disposition.decision == "Escalate":
+            reason = disposition.reasons[0] if disposition.reasons else "escalated"
+            return {
+                "error": reason,
+                "decision": "Escalate",
+                "reason": reason,
+                "escalation": {"source": "governance", "reason": reason},
+            }
         return await self._real_mcp_call_tool(server_url, tool_name, arguments)
 
     async def _handle_governance_unavailable(
@@ -560,6 +633,38 @@ class _GovernedMcpRuntime:
             ),
             control_states=disposition.control_states
             + (ControlState(control_id, mode, outcome),),
+            policy_version=disposition.policy_version,
+            latency_ms=disposition.latency_ms,
+        )
+
+    @staticmethod
+    def _merge_pre_disposition(
+        pre_disposition: Disposition,
+        disposition: Disposition,
+    ) -> Disposition:
+        pre_controls = tuple(
+            control
+            for control in pre_disposition.fired_controls
+            if control.control_id != "A6"
+        )
+        shadow_reasons = tuple(
+            reason
+            for reason in pre_disposition.reasons
+            if reason.startswith("would-")
+        )
+        if disposition.decision == "Deny":
+            reasons = disposition.reasons + tuple(
+                reason for reason in shadow_reasons if reason not in disposition.reasons
+            )
+        else:
+            reasons = pre_disposition.reasons + tuple(
+                reason for reason in disposition.reasons if reason not in pre_disposition.reasons
+            )
+        return Disposition(
+            decision=disposition.decision,
+            reasons=reasons,
+            fired_controls=pre_controls + disposition.fired_controls,
+            control_states=pre_disposition.control_states + disposition.control_states,
             policy_version=disposition.policy_version,
             latency_ms=disposition.latency_ms,
         )
