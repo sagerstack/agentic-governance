@@ -68,8 +68,9 @@ async def test_every_call_emits_one_audit_event_and_allows_execution(providers):
     assert entry["disposition"]["decision"] == "Auto-Execute"
     assert entry["correlationId"] == "claim-456"
     assert entry["envelope"]["toolName"] == "executeQuery"
-    assert entry["envelope"]["paramsRef"]["receipt"]["redacted"] is True
-    assert entry["envelope"]["paramsRef"]["receipt"]["sha256"]
+    assert set(entry["envelope"]["paramsRef"]) == {"payloadSha256"}
+    assert len(entry["envelope"]["paramsRef"]["payloadSha256"]) == 64
+    assert "SECRET-RECEIPT-PAYLOAD" not in str(entry)
     assert entry["prevEntryHash"] is None
 
 

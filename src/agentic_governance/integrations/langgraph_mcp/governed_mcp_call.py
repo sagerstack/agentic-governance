@@ -326,13 +326,7 @@ class _GovernedMcpRuntime:
                                     else exposure_rule.escalate_ceiling
                                 )
                             ) if exposure_rule is not None else None,
-                            observed_value=(
-                                str(aggregate_value)
-                                if breach_outcome == "aggregate-limit-exceeded"
-                                else str(exposure.amount)
-                                if exposure.amount is not None
-                                else "missing"
-                            ),
+                            observed_value=breach_outcome,
                         )
                     else:
                         disposition = self._apply_control_result(
@@ -341,11 +335,7 @@ class _GovernedMcpRuntime:
                             name="exposure-limits",
                             mode=exposure_mode,
                             allowed=True,
-                            observed_value=(
-                                str(aggregate_value)
-                                if aggregate_value is not None
-                                else str(exposure.amount)
-                            ),
+                            observed_value="within-exposure-limits",
                         )
             except Exception:
                 return await self._handle_governance_unavailable(
@@ -459,9 +449,9 @@ class _GovernedMcpRuntime:
                             else None
                         ),
                         observed_value=(
-                            {"missing": list(evidence.missing)}
+                            {"classification": "missing-evidence", "paths": list(evidence.missing)}
                             if evidence.missing
-                            else str(evidence.minimum_observed)
+                            else "confidence-below-threshold"
                         ),
                     )
                 else:
@@ -471,7 +461,7 @@ class _GovernedMcpRuntime:
                         name="evidence-quality",
                         mode=evidence_mode,
                         allowed=True,
-                        observed_value=str(evidence.minimum_observed),
+                        observed_value="confidence-sufficient",
                     )
             except Exception:
                 if exposure_reservation is not None:
@@ -504,6 +494,7 @@ class _GovernedMcpRuntime:
                 "error": reason,
                 "decision": "Escalate",
                 "reason": reason,
+                "reasons": list(disposition.reasons),
                 "escalation": {"source": "governance", "reason": reason},
             }
         return await self._real_mcp_call_tool(server_url, tool_name, arguments)

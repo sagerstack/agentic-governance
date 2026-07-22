@@ -62,6 +62,7 @@ def _escalation(reason):
         "error": reason,
         "decision": "Escalate",
         "reason": reason,
+        "reasons": [reason],
         "escalation": {"source": "governance", "reason": reason},
     }
 

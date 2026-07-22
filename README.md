@@ -91,7 +91,7 @@ assertion, and the gateway/hybrid deployment pattern.
   strict per-wire-tool argument schemas run before A5; Escalate returns a stable
   governance-sourced handoff marker; structural tests assert action-auth independence.
 
-All six Group-A slices are implemented at v0.6.0 pending final verification. See
+All six Group-A slices are implemented at v0.6.1 pending final verification. See
 `docs/plan/group-a-poc-plan.md`.
 
 ---
@@ -240,15 +240,25 @@ it in Docker).
 - **Escalation handoff contract** — governance returns:
   ```json
   {"error":"exposure-exceeded","decision":"Escalate","reason":"exposure-exceeded",
+   "reasons":["exposure-exceeded","evidence-insufficient"],
    "escalation":{"source":"governance","reason":"exposure-exceeded"}}
   ```
-  The host app must route this exact marker to human review. It records governance
+  `reason` and nested `escalation.reason` remain the stable primary-reason contract;
+  top-level `reasons` is the canonical ordered list of every disposition reason (primary
+  first). The host app must route this marker to human review. It records governance
   escalation metadata as `source="governance"` plus the exact reason; its pre-existing
   validator/loop paths record `source="internal"` plus their internal reason.
 - **Audit** — each run writes a new file `./.agentic_governance/audit-<UTC>-<hex>.jsonl`
-  (previous runs preserved). Sensitive values are stored as SHA-256 hashes; raw payloads
-  never enter the log. Passing an explicit `.jsonl` path to `JsonlAuditSink` overrides the
-  per-run file.
+  (previous runs preserved). Declared arguments persist only as
+  `paramsRef: {"payloadSha256":"<canonical deterministic SHA-256>"}`; the raw field tree
+  and scalar values are retained only in non-serialized memory for controls. Trusted
+  receipt/provider content likewise persists only through opaque receipt/snapshot refs.
+  A7/A9 audit diagnostics retain policy thresholds and coarse outcomes, not raw monetary
+  amounts or confidence values; A8 action counts remain readable. Passing an explicit
+  `.jsonl` path to `JsonlAuditSink` overrides the per-run file.
+- **Explicitly deferred** — canonical corrected/FX facts, durable cross-process counters,
+  cited-policy evidence, and tamper-evident audit storage remain unchanged and are not
+  implemented by the v0.6.1 privacy/compatibility patch.
 
 ---
 
@@ -262,4 +272,4 @@ pytest
 ## Versioning
 
 Semantic-ish: **+minor per slice**, **+major per completed group**, patch for fixes.
-Current: **0.6.0**. See `CHANGELOG.md`.
+Current: **0.6.1**. See `CHANGELOG.md`.

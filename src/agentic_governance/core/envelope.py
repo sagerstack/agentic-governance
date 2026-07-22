@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
+import json
 from typing import Any
 from uuid import uuid4
 
@@ -87,7 +88,9 @@ def build_envelope(
         action_type="mcp_call",
         tool_name=tool_name,
         mcp_server=server_url,
-        params_ref=redact_params(arguments if arguments is not None else {}),
+        params_ref={
+            "payloadSha256": _stable_hash(arguments if arguments is not None else {})
+        },
         declared_params=(
             dict(arguments) if isinstance(arguments, Mapping) else arguments
         ),
@@ -118,7 +121,24 @@ def redact_params(value: Any, *, key: str | None = None) -> Any:
 
 
 def _stable_hash(value: Any) -> str:
-    return sha256(repr(value).encode("utf-8")).hexdigest()
+    try:
+        canonical = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+            default=_canonical_json_default,
+        )
+    except (TypeError, ValueError):
+        canonical = repr(value)
+    return sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _canonical_json_default(value: Any) -> Any:
+    if isinstance(value, (set, frozenset)):
+        return sorted(value, key=repr)
+    return repr(value)
 
 
 def _hash_or_none(value: str | None) -> str | None:
