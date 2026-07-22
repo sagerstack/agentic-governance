@@ -10,6 +10,9 @@
     "A3": {"name": "identity", "modeEnv": "AGENTIC_GOV_ENABLE_IDENTITY", "defaultMode": "enforce"},
     "A4": {"name": "mandate", "modeEnv": "AGENTIC_GOV_ENABLE_MANDATE", "defaultMode": "enforce"},
     "A2": {"name": "integrity", "modeEnv": "AGENTIC_GOV_ENABLE_INTEGRITY", "defaultMode": "enforce"},
+    "A7": {"name": "exposure", "modeEnv": "AGENTIC_GOV_ENABLE_EXPOSURE", "defaultMode": "enforce"},
+    "A8": {"name": "rate", "modeEnv": "AGENTIC_GOV_ENABLE_RATE", "defaultMode": "enforce"},
+    "A9": {"name": "evidence", "modeEnv": "AGENTIC_GOV_ENABLE_EVIDENCE", "defaultMode": "enforce"},
     "A12": {"name": "fail-closed-floor", "modeEnv": "AGENTIC_GOV_ENABLE_FAIL_CLOSED", "defaultMode": "enforce"}
   },
   "allowlist": [
@@ -45,6 +48,58 @@
     "markAiReviewed": [{"server": "db", "tools": ["updateClaimStatus"]}],
     "application": [{"server": "db", "tools": ["insertClaim", "executeQuery", "insertAuditLog"]}]
   },
+  "exposure": [
+    {
+      "description": "POC placeholder thresholds; tune before production use",
+      "server": "db",
+      "tool": "insertClaim",
+      "identities": ["intake"],
+      "valuePath": "totalAmount",
+      "currency": "SGD",
+      "perAction": {
+        "escalateAbove": "500.00",
+        "hardDenyAbove": "5000.00",
+        "ceilingDisposition": "Escalate",
+        "hardCapDisposition": "Deny"
+      },
+      "aggregate": {
+        "limit": "2000.00",
+        "windowSeconds": 86400,
+        "keyPaths": ["employeeId"],
+        "exceededDisposition": "Escalate"
+      }
+    }
+  ],
+  "rate": [
+    {
+      "description": "POC placeholder: five final submissions per employee and per session per hour",
+      "server": "db",
+      "tool": "insertClaim",
+      "identities": ["intake"],
+      "keyPaths": ["employeeId", "sessionClaimId"],
+      "maxAttempts": 5,
+      "windowSeconds": 3600,
+      "exceededDisposition": "Deny"
+    }
+  ],
+  "evidence": [
+    {
+      "description": "Receipt-confidence-only POC; cited-policy evidence is deferred",
+      "server": "db",
+      "tool": "insertClaim",
+      "identities": ["intake"],
+      "confidencePath": "extractedReceipt.confidence",
+      "requiredConfidenceFields": ["merchant", "date", "totalAmount", "currency"],
+      "requiredEvidencePaths": [
+        "extractedReceipt.fields.merchant",
+        "extractedReceipt.fields.date",
+        "extractedReceipt.fields.totalAmount",
+        "extractedReceipt.fields.currency"
+      ],
+      "minimumConfidence": "0.70",
+      "insufficientDisposition": "Escalate"
+    }
+  ],
   "integrityRules": [
     {
       "server": "db",

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 from agentic_governance.adapters.control_modes import ControlModeConfig
+from agentic_governance.adapters.inmemory_counters import InMemoryCounterStore
 from agentic_governance.adapters.identity_mandates import (
     DemoIdentityOverrideConfig,
     IdentityMandateConfig,
@@ -22,10 +25,18 @@ from agentic_governance.core.disposition import (
 from agentic_governance.core.engine import GovernanceEngine
 from agentic_governance.core.envelope import GovernanceEnvelope
 from agentic_governance.core.integrity import IntegrityEvaluator
+from agentic_governance.core.quantitative import QuantitativeEvaluator
 from agentic_governance.integrations.langgraph_mcp.call_context import TrustedStateProviders
 
 RealMcpCallTool = Callable[[str, str, dict[str, Any] | None], Awaitable[Any]]
 HIGH_IMPACT_TOOLS = {"insertClaim", "updateClaimStatus"}
+
+
+@dataclass(frozen=True)
+class _ExposureReservation:
+    key: str
+    amount: Decimal
+    window_start: float
 
 
 class GovernanceUnavailable(RuntimeError):
@@ -62,6 +73,8 @@ class _GovernedMcpRuntime:
             identity_mandate_config
         )
         self._integrity_evaluator = IntegrityEvaluator()
+        self._quantitative_evaluator = QuantitativeEvaluator()
+        self._counter_store = InMemoryCounterStore()
         self._pending_audit_events: list[tuple[GovernanceEnvelope, Disposition]] = []
 
     async def call(self, serverUrl: str, toolName: str, arguments: dict[str, Any] | None) -> Any:
@@ -181,6 +194,229 @@ class _GovernedMcpRuntime:
                     ),
                 )
 
+        # A7 — per-action and atomically reserved aggregate monetary exposure.
+        exposure_reservation: _ExposureReservation | None = None
+        exposure_mode = self._control_modes.mode("A7")
+        if exposure_mode == "off":
+            disposition = self._add_skipped(disposition, "A7")
+        else:
+            try:
+                exposure_rule, exposure = self._quantitative_evaluator.exposure(
+                    server_url=serverUrl,
+                    tool_name=toolName,
+                    identity=identity_id,
+                    declared=envelope.declared_params,
+                    trusted=envelope.trusted_context,
+                    rules=self._policy.exposure_rules,
+                )
+                if not exposure.applicable:
+                    disposition = self._add_state(
+                        disposition, ControlState("A7", exposure_mode, "not-applicable")
+                    )
+                else:
+                    breach_disposition = exposure.disposition
+                    breach_outcome = exposure.outcome
+                    aggregate_value: Decimal | None = None
+                    should_reserve = (
+                        exposure.amount is not None
+                        and exposure.aggregate_key is not None
+                        and not (breach_disposition and exposure_mode == "enforce")
+                    )
+                    if should_reserve and exposure_rule is not None:
+                        aggregate = await self._counter_store.add_window(
+                            exposure.aggregate_key,
+                            exposure.amount,
+                            exposure_rule.aggregate_window_seconds,
+                        )
+                        aggregate_value = aggregate.value
+                        exposure_reservation = _ExposureReservation(
+                            exposure.aggregate_key,
+                            exposure.amount,
+                            aggregate.window_start,
+                        )
+                        if aggregate.value > exposure_rule.aggregate_limit:
+                            aggregate_disposition = exposure_rule.aggregate_disposition
+                            if self._decision_rank(aggregate_disposition) > self._decision_rank(
+                                breach_disposition
+                            ):
+                                breach_disposition = aggregate_disposition
+                                breach_outcome = "aggregate-limit-exceeded"
+                    if breach_disposition:
+                        disposition = self._apply_quantitative_result(
+                            disposition,
+                            control_id="A7",
+                            name="exposure-limits",
+                            mode=exposure_mode,
+                            breach_disposition=breach_disposition,
+                            reason="exposure-exceeded",
+                            outcome=breach_outcome,
+                            threshold=(
+                                None
+                                if breach_outcome.startswith("missing-")
+                                else str(exposure_rule.aggregate_limit)
+                                if breach_outcome == "aggregate-limit-exceeded"
+                                else str(
+                                    exposure_rule.hard_deny_cap
+                                    if breach_outcome == "hard-cap-exceeded"
+                                    else exposure_rule.escalate_ceiling
+                                )
+                            ) if exposure_rule is not None else None,
+                            observed_value=(
+                                str(aggregate_value)
+                                if breach_outcome == "aggregate-limit-exceeded"
+                                else str(exposure.amount)
+                                if exposure.amount is not None
+                                else "missing"
+                            ),
+                        )
+                    else:
+                        disposition = self._apply_control_result(
+                            disposition,
+                            control_id="A7",
+                            name="exposure-limits",
+                            mode=exposure_mode,
+                            allowed=True,
+                            observed_value=(
+                                str(aggregate_value)
+                                if aggregate_value is not None
+                                else str(exposure.amount)
+                            ),
+                        )
+            except Exception:
+                return await self._handle_governance_unavailable(
+                    envelope, serverUrl, toolName, arguments
+                )
+
+        # A8 — count attempts atomically for every configured employee/session key.
+        rate_mode = self._control_modes.mode("A8")
+        if rate_mode == "off":
+            disposition = self._add_skipped(disposition, "A8")
+        else:
+            try:
+                rate_match = self._quantitative_evaluator.rate(
+                    server_url=serverUrl,
+                    tool_name=toolName,
+                    identity=identity_id,
+                    trusted=envelope.trusted_context,
+                    rules=self._policy.rate_rules,
+                )
+                if rate_match is None:
+                    disposition = self._add_state(
+                        disposition, ControlState("A8", rate_mode, "not-applicable")
+                    )
+                else:
+                    rate_rule, rate = rate_match
+                    if not rate.keys:
+                        disposition = self._apply_quantitative_result(
+                            disposition,
+                            control_id="A8",
+                            name="rate-limits",
+                            mode=rate_mode,
+                            breach_disposition="Deny",
+                            reason="rate-exceeded",
+                            outcome="missing-rate-key",
+                            threshold=str(rate_rule.max_attempts),
+                            observed_value="missing",
+                        )
+                    else:
+                        counts = [
+                            await self._counter_store.add_window(
+                                key, Decimal("1"), rate_rule.window_seconds
+                            )
+                            for key in rate.keys
+                        ]
+                        observed_count = max(counter.value for counter in counts)
+                        if observed_count > rate_rule.max_attempts:
+                            disposition = self._apply_quantitative_result(
+                                disposition,
+                                control_id="A8",
+                                name="rate-limits",
+                                mode=rate_mode,
+                                breach_disposition=rate_rule.exceeded_disposition,
+                                reason="rate-exceeded",
+                                outcome="rate-limit-exceeded",
+                                threshold=str(rate_rule.max_attempts),
+                                observed_value=str(observed_count),
+                            )
+                        else:
+                            disposition = self._apply_control_result(
+                                disposition,
+                                control_id="A8",
+                                name="rate-limits",
+                                mode=rate_mode,
+                                allowed=True,
+                                observed_value=str(observed_count),
+                            )
+            except Exception:
+                if exposure_reservation is not None:
+                    await self._release_exposure(exposure_reservation)
+                return await self._handle_governance_unavailable(
+                    envelope, serverUrl, toolName, arguments
+                )
+
+        # A9 — receipt evidence presence and minimum configured confidence.
+        evidence_mode = self._control_modes.mode("A9")
+        if evidence_mode == "off":
+            disposition = self._add_skipped(disposition, "A9")
+        else:
+            try:
+                evidence_rule, evidence = self._quantitative_evaluator.evidence(
+                    server_url=serverUrl,
+                    tool_name=toolName,
+                    identity=identity_id,
+                    trusted=envelope.trusted_context,
+                    rules=self._policy.evidence_rules,
+                )
+                if not evidence.applicable:
+                    disposition = self._add_state(
+                        disposition, ControlState("A9", evidence_mode, "not-applicable")
+                    )
+                elif not evidence.sufficient:
+                    disposition = self._apply_quantitative_result(
+                        disposition,
+                        control_id="A9",
+                        name="evidence-quality",
+                        mode=evidence_mode,
+                        breach_disposition=(
+                            evidence_rule.insufficient_disposition
+                            if evidence_rule is not None
+                            else "Escalate"
+                        ),
+                        reason="evidence-insufficient",
+                        outcome=(
+                            "missing-evidence"
+                            if evidence.missing
+                            else "confidence-below-threshold"
+                        ),
+                        threshold=(
+                            str(evidence_rule.minimum_confidence)
+                            if evidence_rule is not None
+                            else None
+                        ),
+                        observed_value=(
+                            {"missing": list(evidence.missing)}
+                            if evidence.missing
+                            else str(evidence.minimum_observed)
+                        ),
+                    )
+                else:
+                    disposition = self._apply_control_result(
+                        disposition,
+                        control_id="A9",
+                        name="evidence-quality",
+                        mode=evidence_mode,
+                        allowed=True,
+                        observed_value=str(evidence.minimum_observed),
+                    )
+            except Exception:
+                if exposure_reservation is not None:
+                    await self._release_exposure(exposure_reservation)
+                return await self._handle_governance_unavailable(
+                    envelope, serverUrl, toolName, arguments
+                )
+
+        if disposition.decision in {"Deny", "Escalate"} and exposure_reservation is not None:
+            await self._release_exposure(exposure_reservation)
         return await self._record_and_dispatch(
             envelope, disposition, serverUrl, toolName, arguments
         )
@@ -194,9 +430,9 @@ class _GovernedMcpRuntime:
         arguments: dict[str, Any] | None,
     ) -> Any:
         await self._record(envelope, disposition)
-        if disposition.decision == "Deny":
-            reason = disposition.reasons[0] if disposition.reasons else "denied"
-            return {"error": reason, "decision": "Deny"}
+        if disposition.decision in {"Deny", "Escalate"}:
+            reason = disposition.reasons[0] if disposition.reasons else disposition.decision.lower()
+            return {"error": reason, "decision": disposition.decision}
         return await self._real_mcp_call_tool(server_url, tool_name, arguments)
 
     async def _handle_governance_unavailable(
@@ -326,6 +562,87 @@ class _GovernedMcpRuntime:
             + (ControlState(control_id, mode, outcome),),
             policy_version=disposition.policy_version,
             latency_ms=disposition.latency_ms,
+        )
+
+    @classmethod
+    def _apply_quantitative_result(
+        cls,
+        disposition: Disposition,
+        *,
+        control_id: str,
+        name: str,
+        mode: str,
+        breach_disposition: str,
+        reason: str,
+        outcome: str,
+        threshold: Any = None,
+        observed_value: Any = None,
+    ) -> Disposition:
+        controls_without_a6 = tuple(
+            control for control in disposition.fired_controls if control.control_id != "A6"
+        )
+        if mode == "observe":
+            decision = disposition.decision
+            shadow_reason = f"would-{breach_disposition.lower()}:{reason}"
+            reasons = disposition.reasons + (
+                () if shadow_reason in disposition.reasons else (shadow_reason,)
+            )
+            result = f"would-{breach_disposition.lower()}"
+            state_outcome = f"{result}:{reason}"
+        else:
+            decision = cls._stronger_decision(disposition.decision, breach_disposition)
+            previous = tuple(
+                existing
+                for existing in disposition.reasons
+                if existing.startswith("would-") or existing != "tool-allowed"
+            )
+            if decision == "Deny" and breach_disposition == "Deny":
+                reasons = (reason,) + tuple(existing for existing in previous if existing != reason)
+            elif reason in previous:
+                reasons = previous
+            else:
+                reasons = previous + (reason,)
+            result = breach_disposition
+            state_outcome = outcome
+        return Disposition(
+            decision=decision,
+            reasons=reasons,
+            fired_controls=controls_without_a6
+            + (
+                FiredControl(
+                    control_id=control_id,
+                    name=name,
+                    result=result,
+                    threshold=threshold,
+                    observed_value=observed_value,
+                ),
+                FiredControl(
+                    control_id="A6",
+                    name="deterministic-disposition",
+                    result=decision,
+                ),
+            ),
+            control_states=disposition.control_states
+            + (ControlState(control_id, mode, state_outcome),),
+            policy_version=disposition.policy_version,
+            latency_ms=disposition.latency_ms,
+        )
+
+    @staticmethod
+    def _decision_rank(decision: str | None) -> int:
+        return {None: 0, "Auto-Execute": 0, "Observe": 0, "Escalate": 1, "Deny": 2}.get(
+            decision, 0
+        )
+
+    @classmethod
+    def _stronger_decision(cls, current: str, candidate: str) -> str:
+        return candidate if cls._decision_rank(candidate) > cls._decision_rank(current) else current
+
+    async def _release_exposure(self, reservation: _ExposureReservation) -> None:
+        await self._counter_store.rollback_window(
+            reservation.key,
+            reservation.amount,
+            reservation.window_start,
         )
 
     async def _record(self, envelope: GovernanceEnvelope, disposition: Disposition) -> None:

@@ -28,6 +28,9 @@ def _set_servers(monkeypatch):
     monkeypatch.setenv("RAG_MCP_URL", "http://rag")
     monkeypatch.setenv("DB_MCP_URL", "http://db")
     monkeypatch.setenv("CURRENCY_MCP_URL", "http://currency")
+    monkeypatch.setenv("AGENTIC_GOV_ENABLE_EXPOSURE", "off")
+    monkeypatch.setenv("AGENTIC_GOV_ENABLE_RATE", "off")
+    monkeypatch.setenv("AGENTIC_GOV_ENABLE_EVIDENCE", "off")
 
 
 def _providers(identity, *, employee_id="emp-123", db_claim_id=None):

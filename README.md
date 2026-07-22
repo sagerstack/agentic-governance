@@ -84,8 +84,11 @@ assertion, and the gateway/hybrid deployment pattern.
 - **Slice 3 — envelope integrity (A2):** config-defined comparisons bind draft/final
   submissions to trusted employee identity and status updates to the trusted database
   claim id. Missing/mismatched required facts are denied before dispatch.
+- **Slice 4 — quantitative dispositions (A7/A8/A9):** final intake submissions are
+  governed by per-action/aggregate SGD exposure, atomic employee/session attempt rates,
+  and required receipt evidence/confidence. Breaches deterministically Deny or Escalate.
 
-Remaining Group A slices: exposure/rate/evidence knobs (A7/A8/A9), input hardening (A10). See
+Remaining Group A slice: input hardening and Escalate handoff (A10/A11). See
 `docs/plan/group-a-poc-plan.md`.
 
 ---
@@ -187,12 +190,14 @@ it in Docker).
   AGENTIC_GOV_ENABLE_IDENTITY=enforce     # A3
   AGENTIC_GOV_ENABLE_MANDATE=enforce      # A4
   AGENTIC_GOV_ENABLE_INTEGRITY=observe    # A2; use shadow mode for first deployment
+  AGENTIC_GOV_ENABLE_EXPOSURE=enforce     # A7
+  AGENTIC_GOV_ENABLE_RATE=enforce         # A8
+  AGENTIC_GOV_ENABLE_EVIDENCE=enforce     # A9
   AGENTIC_GOV_ENABLE_FAIL_CLOSED=enforce  # A12
   ```
   **Warning:** setting `AGENTIC_GOV_ENABLE_FAIL_CLOSED=off` removes the high-impact
   governance-unavailable safety net. The audit sink is always on and has no disable flag.
-  Future controls follow `AGENTIC_GOV_ENABLE_<CONTROL>` (EXPOSURE, RATE, EVIDENCE,
-  SCHEMA).
+  Future controls follow `AGENTIC_GOV_ENABLE_<CONTROL>` (for example, SCHEMA).
 - **Demo/testing toggles** — all are read once at governance runtime initialization
   and default to empty/off:
   ```bash
@@ -214,6 +219,15 @@ it in Docker).
   identity is denied as `unverified-identity`. Tamper entries are comma-separated
   `wireTool:declaredField` pairs. When unset, trusted identity and integrity evaluation
   are unchanged.
+- **Tunable Slice-4 defaults** — the bundled policy marks these POC values as
+  placeholders: per-action escalation above **SGD 500**, hard Deny above **SGD 5,000**,
+  aggregate escalation above **SGD 2,000 per employee/day**, and more than **5 final
+  insertClaim attempts per employee or session/hour**. Final intake submission also
+  requires receipt fields plus confidence ≥ **0.70** for merchant/date/total/currency.
+  Application draft inserts are excluded. Override thresholds and breach dispositions
+  with `AGENTIC_GOV_POLICY_FILE`. `Escalate` is audited and blocked from real tool
+  execution; app handoff is deferred to Slice 5. Reasons are `exposure-exceeded`,
+  `rate-exceeded`, and `evidence-insufficient`.
 - **Audit** — each run writes a new file `./.agentic_governance/audit-<UTC>-<hex>.jsonl`
   (previous runs preserved). Sensitive values are stored as SHA-256 hashes; raw payloads
   never enter the log. Passing an explicit `.jsonl` path to `JsonlAuditSink` overrides the
@@ -231,4 +245,4 @@ pytest
 ## Versioning
 
 Semantic-ish: **+minor per slice**, **+major per completed group**, patch for fixes.
-Current: **0.4.0**. See `CHANGELOG.md`.
+Current: **0.5.0**. See `CHANGELOG.md`.

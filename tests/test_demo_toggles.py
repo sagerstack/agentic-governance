@@ -26,6 +26,9 @@ def policy_environment(monkeypatch):
     monkeypatch.delenv("AGENTIC_GOV_DENY_TOOLS", raising=False)
     monkeypatch.delenv("AGENTIC_GOV_REVOKE_GRANTS", raising=False)
     monkeypatch.delenv("AGENTIC_GOV_FORCE_IDENTITY", raising=False)
+    monkeypatch.setenv("AGENTIC_GOV_ENABLE_EXPOSURE", "off")
+    monkeypatch.setenv("AGENTIC_GOV_ENABLE_RATE", "off")
+    monkeypatch.setenv("AGENTIC_GOV_ENABLE_EVIDENCE", "off")
 
 
 def _providers(identity="intake"):

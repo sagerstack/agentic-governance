@@ -16,6 +16,9 @@ def clean_governance_environment(monkeypatch):
         "AGENTIC_GOV_ENABLE_IDENTITY",
         "AGENTIC_GOV_ENABLE_MANDATE",
         "AGENTIC_GOV_ENABLE_INTEGRITY",
+        "AGENTIC_GOV_ENABLE_EXPOSURE",
+        "AGENTIC_GOV_ENABLE_RATE",
+        "AGENTIC_GOV_ENABLE_EVIDENCE",
         "AGENTIC_GOV_ENABLE_FAIL_CLOSED",
     ):
         monkeypatch.delenv(name, raising=False)

@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from agentic_governance.core.integrity import IntegrityCheck, IntegrityRule
+from agentic_governance.core.quantitative import EvidenceRule, ExposureRule, RateRule
 
 
 logger = logging.getLogger(__name__)
@@ -24,9 +25,13 @@ _REQUIRED_SECTIONS = {
     "identities",
     "mandates",
     "integrityRules",
+    "exposure",
+    "rate",
+    "evidence",
 }
 _SUPPORTED_OPERATORS = {"exact", "currency", "integer", "decimal", "normalizedText"}
-_REQUIRED_CONTROLS = {"A2", "A3", "A4", "A5", "A12"}
+_REQUIRED_CONTROLS = {"A2", "A3", "A4", "A5", "A7", "A8", "A9", "A12"}
+_VALID_BREACH_DISPOSITIONS = {"Deny", "Escalate"}
 
 
 class PolicyConfigError(ValueError):
@@ -48,6 +53,9 @@ class LoadedPolicy:
     identities: tuple[Mapping[str, str], ...]
     mandates: Mapping[str, frozenset[tuple[str, str]]]
     integrity_rules: tuple[IntegrityRule, ...]
+    exposure_rules: tuple[ExposureRule, ...]
+    rate_rules: tuple[RateRule, ...]
+    evidence_rules: tuple[EvidenceRule, ...]
     controls: Mapping[str, ControlSpec]
     simulated_tampers: frozenset[tuple[str, str]]
     source: str
@@ -89,6 +97,9 @@ def load_policy(environ: Mapping[str, str] | None = None) -> LoadedPolicy:
     integrity_rules = _load_integrity_rules(
         document["integrityRules"], servers, identity_ids
     )
+    exposure_rules = _load_exposure_rules(document["exposure"], servers, identity_ids)
+    rate_rules = _load_rate_rules(document["rate"], servers, identity_ids)
+    evidence_rules = _load_evidence_rules(document["evidence"], servers, identity_ids)
     simulated_tampers = _load_simulated_tampers(env, integrity_rules)
     return LoadedPolicy(
         servers=servers,
@@ -96,6 +107,9 @@ def load_policy(environ: Mapping[str, str] | None = None) -> LoadedPolicy:
         identities=identities,
         mandates=mandates,
         integrity_rules=integrity_rules,
+        exposure_rules=exposure_rules,
+        rate_rules=rate_rules,
+        evidence_rules=evidence_rules,
         controls=controls,
         simulated_tampers=simulated_tampers,
         source=source,
@@ -250,6 +264,163 @@ def _load_integrity_check(raw: Any, rule_index: int) -> IntegrityCheck:
     else:
         kwargs["constant"] = raw["constant"]
     return IntegrityCheck(**kwargs)
+
+
+def _load_exposure_rules(
+    raw: Any, servers: Mapping[str, str], identity_ids: set[str]
+) -> tuple[ExposureRule, ...]:
+    if not isinstance(raw, list):
+        raise PolicyConfigError("exposure must be an array")
+    rules: list[ExposureRule] = []
+    for index, item in enumerate(raw):
+        server_url, tool, identities = _load_quantitative_scope(
+            item, servers, identity_ids, f"exposure[{index}]"
+        )
+        per_action = item.get("perAction")
+        aggregate = item.get("aggregate")
+        if not isinstance(per_action, dict) or not isinstance(aggregate, dict):
+            raise PolicyConfigError(f"exposure[{index}] requires perAction and aggregate")
+        ceiling = _positive_decimal(per_action.get("escalateAbove"), "escalateAbove")
+        hard_cap = _positive_decimal(per_action.get("hardDenyAbove"), "hardDenyAbove")
+        aggregate_limit = _positive_decimal(aggregate.get("limit"), "aggregate.limit")
+        if hard_cap <= ceiling:
+            raise PolicyConfigError("exposure hard cap must exceed escalate ceiling")
+        ceiling_disposition = _disposition(per_action.get("ceilingDisposition"))
+        hard_disposition = _disposition(per_action.get("hardCapDisposition"))
+        aggregate_disposition = _disposition(aggregate.get("exceededDisposition"))
+        value_path = item.get("valuePath")
+        currency = item.get("currency")
+        key_paths = aggregate.get("keyPaths")
+        window_seconds = aggregate.get("windowSeconds")
+        if not isinstance(value_path, str) or not value_path or not isinstance(currency, str) or not currency:
+            raise PolicyConfigError(f"exposure[{index}] requires valuePath and currency")
+        _validate_paths_and_window(key_paths, window_seconds, f"exposure[{index}].aggregate")
+        rules.append(
+            ExposureRule(
+                server_url=server_url,
+                tool_name=tool,
+                identities=frozenset(identities),
+                value_path=value_path,
+                currency=currency,
+                escalate_ceiling=ceiling,
+                hard_deny_cap=hard_cap,
+                ceiling_disposition=ceiling_disposition,
+                hard_cap_disposition=hard_disposition,
+                aggregate_limit=aggregate_limit,
+                aggregate_window_seconds=window_seconds,
+                aggregate_key_paths=tuple(key_paths),
+                aggregate_disposition=aggregate_disposition,
+            )
+        )
+    return tuple(rules)
+
+
+def _load_rate_rules(
+    raw: Any, servers: Mapping[str, str], identity_ids: set[str]
+) -> tuple[RateRule, ...]:
+    if not isinstance(raw, list):
+        raise PolicyConfigError("rate must be an array")
+    rules: list[RateRule] = []
+    for index, item in enumerate(raw):
+        server_url, tool, identities = _load_quantitative_scope(
+            item, servers, identity_ids, f"rate[{index}]"
+        )
+        key_paths = item.get("keyPaths")
+        window_seconds = item.get("windowSeconds")
+        max_attempts = item.get("maxAttempts")
+        _validate_paths_and_window(key_paths, window_seconds, f"rate[{index}]")
+        if not isinstance(max_attempts, int) or isinstance(max_attempts, bool) or max_attempts <= 0:
+            raise PolicyConfigError(f"rate[{index}] maxAttempts must be a positive integer")
+        rules.append(
+            RateRule(
+                server_url=server_url,
+                tool_name=tool,
+                identities=frozenset(identities),
+                key_paths=tuple(key_paths),
+                max_attempts=max_attempts,
+                window_seconds=window_seconds,
+                exceeded_disposition=_disposition(item.get("exceededDisposition")),
+            )
+        )
+    return tuple(rules)
+
+
+def _load_evidence_rules(
+    raw: Any, servers: Mapping[str, str], identity_ids: set[str]
+) -> tuple[EvidenceRule, ...]:
+    if not isinstance(raw, list):
+        raise PolicyConfigError("evidence must be an array")
+    rules: list[EvidenceRule] = []
+    for index, item in enumerate(raw):
+        server_url, tool, identities = _load_quantitative_scope(
+            item, servers, identity_ids, f"evidence[{index}]"
+        )
+        confidence_path = item.get("confidencePath")
+        confidence_fields = item.get("requiredConfidenceFields")
+        evidence_paths = item.get("requiredEvidencePaths")
+        if not isinstance(confidence_path, str) or not confidence_path:
+            raise PolicyConfigError(f"evidence[{index}] requires confidencePath")
+        for value, name in (
+            (confidence_fields, "requiredConfidenceFields"),
+            (evidence_paths, "requiredEvidencePaths"),
+        ):
+            if not isinstance(value, list) or not value or not all(isinstance(path, str) and path for path in value):
+                raise PolicyConfigError(f"evidence[{index}] {name} must be a non-empty string array")
+        minimum = _positive_decimal(item.get("minimumConfidence"), "minimumConfidence", allow_zero=True)
+        if minimum > 1:
+            raise PolicyConfigError("minimumConfidence cannot exceed 1")
+        rules.append(
+            EvidenceRule(
+                server_url=server_url,
+                tool_name=tool,
+                identities=frozenset(identities),
+                confidence_path=confidence_path,
+                required_confidence_fields=tuple(confidence_fields),
+                required_evidence_paths=tuple(evidence_paths),
+                minimum_confidence=minimum,
+                insufficient_disposition=_disposition(item.get("insufficientDisposition")),
+            )
+        )
+    return tuple(rules)
+
+
+def _load_quantitative_scope(
+    item: Any,
+    servers: Mapping[str, str],
+    identity_ids: set[str],
+    label: str,
+) -> tuple[str, str, list[str]]:
+    if not isinstance(item, dict):
+        raise PolicyConfigError(f"{label} must be an object")
+    server_symbol, tool, identities = item.get("server"), item.get("tool"), item.get("identities")
+    if server_symbol not in servers or not isinstance(tool, str) or not tool:
+        raise PolicyConfigError(f"{label} has invalid server/tool")
+    if not isinstance(identities, list) or not identities or not set(identities) <= identity_ids:
+        raise PolicyConfigError(f"{label} has invalid identities")
+    return servers[server_symbol], tool, identities
+
+
+def _positive_decimal(value: Any, label: str, *, allow_zero: bool = False) -> Decimal:
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise PolicyConfigError(f"{label} must be numeric") from exc
+    if not parsed.is_finite() or parsed < 0 or (not allow_zero and parsed == 0):
+        raise PolicyConfigError(f"{label} must be finite and {'non-negative' if allow_zero else 'positive'}")
+    return parsed
+
+
+def _disposition(value: Any) -> str:
+    if value not in _VALID_BREACH_DISPOSITIONS:
+        raise PolicyConfigError(f"breach disposition must be one of {sorted(_VALID_BREACH_DISPOSITIONS)}")
+    return value
+
+
+def _validate_paths_and_window(paths: Any, window_seconds: Any, label: str) -> None:
+    if not isinstance(paths, list) or not paths or not all(isinstance(path, str) and path for path in paths):
+        raise PolicyConfigError(f"{label} keyPaths must be a non-empty string array")
+    if not isinstance(window_seconds, int) or isinstance(window_seconds, bool) or window_seconds <= 0:
+        raise PolicyConfigError(f"{label} windowSeconds must be a positive integer")
 
 
 def _load_simulated_tampers(
