@@ -46,7 +46,7 @@ def providers(monkeypatch):
         "employee_id_provider": lambda: "emp-123",
         "extracted_receipt_provider": lambda: {"merchant": "Cafe", "total": 42, "receipt": "SECRET-RECEIPT-PAYLOAD"},
         "session_claim_id_provider": lambda: "claim-456",
-        "node_identity_provider": lambda: "advisor",
+        "node_identity_provider": lambda: "application",
     }
 
 

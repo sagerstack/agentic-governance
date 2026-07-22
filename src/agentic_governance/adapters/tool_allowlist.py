@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import os
 
 
-RAG_WIRE_TOOLS = frozenset({"searchPolicies", "getPolicyByCategory"})
+RAG_WIRE_TOOLS = frozenset({"searchPolicies"})
 DB_WIRE_TOOLS = frozenset(
     {
         "insertClaim",
@@ -21,9 +21,6 @@ DB_WIRE_TOOLS = frozenset(
         "executeQuery",
         "getClaimSchema",
         "insertAuditLog",
-        "exactDuplicateCheck",
-        "recentClaimsByEmployee",
-        "claimsByMerchantAndEmployee",
     }
 )
 CURRENCY_WIRE_TOOLS = frozenset({"convertCurrency"})

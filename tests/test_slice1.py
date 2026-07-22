@@ -109,14 +109,10 @@ def test_governance_policy_contains_all_legitimate_wire_tools(policy_environment
         ("http://db", "insertClaim"),
         ("http://db", "updateClaimStatus"),
         ("http://rag", "searchPolicies"),
-        ("http://rag", "getPolicyByCategory"),
         ("http://db", "executeQuery"),
         ("http://db", "getClaimSchema"),
         ("http://currency", "convertCurrency"),
         ("http://db", "insertAuditLog"),
-        ("http://db", "exactDuplicateCheck"),
-        ("http://db", "recentClaimsByEmployee"),
-        ("http://db", "claimsByMerchantAndEmployee"),
     }
     assert config.allowed_pairs == expected
     assert not config.allows("http://email", "sendClaimNotification")

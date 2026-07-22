@@ -40,38 +40,142 @@ class _GovernedMcpRuntime:
 
     async def call(self, serverUrl: str, toolName: str, arguments: dict[str, Any] | None) -> Any:
         envelope = self._providers.build_envelope(serverUrl, toolName, arguments)
-        try:
-            await self._identity_registry.verify(envelope.agent_identity.id)
-            await self._mandate_store.mandate_for(envelope.agent_identity.id)
-            disposition = await self._engine.evaluate(envelope)
-        except Exception as exc:
-            if toolName in HIGH_IMPACT_TOOLS:
-                disposition = deny(
-                    "governance-unavailable",
-                    fired_controls=(
-                        FiredControl(control_id="A12", name="fail-closed-floor", result="denied"),
-                    ),
-                )
-                self._pending_audit_events.append((envelope, disposition))
-                await self._try_flush_pending_audit_events()
-                return {"error": "governance-unavailable", "decision": "Deny"}
-            disposition = observe(
-                reasons=("governance-unavailable-non-high-impact",),
-                fired_controls=(
-                    FiredControl(control_id="A12", name="fail-closed-floor", result="observe"),
-                ),
-            )
-            # Record the decision before dispatch, including the fail-open Observe floor.
-            await self._record(envelope, disposition)
-            return await self._real_mcp_call_tool(serverUrl, toolName, arguments)
 
+        # A5 global least privilege runs first. Unknown server/tool pairs are
+        # rejected without consulting identity or mandate state.
+        try:
+            disposition = await self._engine.evaluate(envelope)
+        except Exception:
+            return await self._handle_governance_unavailable(
+                envelope, serverUrl, toolName, arguments
+            )
+        if disposition.decision == "Deny":
+            return await self._record_and_dispatch(
+                envelope, disposition, serverUrl, toolName, arguments
+            )
+
+        # A3 verifies only the trusted identity assembled by the integration.
+        try:
+            verified_identity = await self._identity_registry.verify(envelope.agent_identity.id)
+        except Exception:
+            return await self._handle_governance_unavailable(
+                envelope, serverUrl, toolName, arguments
+            )
+        if verified_identity is None:
+            disposition = self._identity_denied(disposition)
+            return await self._record_and_dispatch(
+                envelope, disposition, serverUrl, toolName, arguments
+            )
+
+        # A4 checks the verified identity's exact server/tool capability.
+        try:
+            mandate = await self._mandate_store.mandate_for(verified_identity.id)
+        except Exception:
+            return await self._handle_governance_unavailable(
+                envelope, serverUrl, toolName, arguments
+            )
+        if not mandate.allows(serverUrl, toolName):
+            disposition = self._mandate_denied(disposition)
+        else:
+            disposition = self._identity_and_mandate_allowed(disposition)
+        return await self._record_and_dispatch(
+            envelope, disposition, serverUrl, toolName, arguments
+        )
+
+    async def _record_and_dispatch(
+        self,
+        envelope: GovernanceEnvelope,
+        disposition: Disposition,
+        server_url: str,
+        tool_name: str,
+        arguments: dict[str, Any] | None,
+    ) -> Any:
         # The audit event represents the decision point and therefore precedes any
         # permitted side effect. A denied call never reaches the real MCP client.
         await self._record(envelope, disposition)
         if disposition.decision == "Deny":
             reason = disposition.reasons[0] if disposition.reasons else "denied"
             return {"error": reason, "decision": "Deny"}
-        return await self._real_mcp_call_tool(serverUrl, toolName, arguments)
+        return await self._real_mcp_call_tool(server_url, tool_name, arguments)
+
+    async def _handle_governance_unavailable(
+        self,
+        envelope: GovernanceEnvelope,
+        server_url: str,
+        tool_name: str,
+        arguments: dict[str, Any] | None,
+    ) -> Any:
+        if tool_name in HIGH_IMPACT_TOOLS:
+            disposition = deny(
+                "governance-unavailable",
+                fired_controls=(
+                    FiredControl(control_id="A12", name="fail-closed-floor", result="denied"),
+                ),
+            )
+            await self._record(envelope, disposition)
+            return {"error": "governance-unavailable", "decision": "Deny"}
+        disposition = observe(
+            reasons=("governance-unavailable-non-high-impact",),
+            fired_controls=(
+                FiredControl(control_id="A12", name="fail-closed-floor", result="observe"),
+            ),
+        )
+        await self._record(envelope, disposition)
+        return await self._real_mcp_call_tool(server_url, tool_name, arguments)
+
+    @staticmethod
+    def _without_a6(disposition: Disposition) -> tuple[FiredControl, ...]:
+        return tuple(
+            control for control in disposition.fired_controls if control.control_id != "A6"
+        )
+
+    @classmethod
+    def _identity_denied(cls, disposition: Disposition) -> Disposition:
+        return Disposition(
+            decision="Deny",
+            reasons=("unverified-identity",),
+            fired_controls=cls._without_a6(disposition)
+            + (
+                FiredControl(control_id="A3", name="identity-verification", result="denied"),
+                FiredControl(control_id="A6", name="deterministic-disposition", result="Deny"),
+            ),
+            policy_version=disposition.policy_version,
+            latency_ms=disposition.latency_ms,
+        )
+
+    @classmethod
+    def _mandate_denied(cls, disposition: Disposition) -> Disposition:
+        return Disposition(
+            decision="Deny",
+            reasons=("mandate-violation",),
+            fired_controls=cls._without_a6(disposition)
+            + (
+                FiredControl(control_id="A3", name="identity-verification", result="verified"),
+                FiredControl(control_id="A4", name="machine-readable-mandate", result="denied"),
+                FiredControl(control_id="A6", name="deterministic-disposition", result="Deny"),
+            ),
+            policy_version=disposition.policy_version,
+            latency_ms=disposition.latency_ms,
+        )
+
+    @classmethod
+    def _identity_and_mandate_allowed(cls, disposition: Disposition) -> Disposition:
+        return Disposition(
+            decision=disposition.decision,
+            reasons=disposition.reasons,
+            fired_controls=cls._without_a6(disposition)
+            + (
+                FiredControl(control_id="A3", name="identity-verification", result="verified"),
+                FiredControl(control_id="A4", name="machine-readable-mandate", result="allowed"),
+                FiredControl(
+                    control_id="A6",
+                    name="deterministic-disposition",
+                    result=disposition.decision,
+                ),
+            ),
+            policy_version=disposition.policy_version,
+            latency_ms=disposition.latency_ms,
+        )
 
     async def _record(self, envelope: GovernanceEnvelope, disposition: Disposition) -> None:
         self._pending_audit_events.append((envelope, disposition))

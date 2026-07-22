@@ -78,8 +78,11 @@ assertion, and the gateway/hybrid deployment pattern.
   **fail-closed floor** for high-impact actions. Observe-only.
 - **Slice 1 — least-privilege deny-unknown-tool (A5):** deny-by-default allowlist keyed on
   `(serverUrl, wire-toolName)`; real **Deny** path (`tool-not-allowed`).
+- **Slice 2 — verified identity + mandate (A3/A4):** seven trusted service identities
+  receive exact per-identity MCP capabilities; missing/unknown identities and
+  out-of-mandate calls are denied before dispatch.
 
-Remaining Group A slices: agent identity + mandate (A3/A4), envelope integrity (A2),
+Remaining Group A slices: envelope integrity (A2),
 exposure/rate/evidence knobs (A7/A8/A9), input hardening (A10). See
 `docs/plan/group-a-poc-plan.md`.
 
@@ -161,6 +164,10 @@ it in Docker).
 - **Least-privilege allowlist** — governance-owned in
   `agentic_governance.adapters.tool_allowlist`; MCP server URLs are read from
   `RAG_MCP_URL`, `DB_MCP_URL`, `CURRENCY_MCP_URL` (with sensible defaults).
+- **Verified identities** — the integration must supply one of `intake`, `compliance`,
+  `fraud`, `advisor`, `humanEscalation`, `markAiReviewed`, or `application`. Web/UI/SSE
+  calls outside graph nodes must use `application`; null or unknown identities are
+  denied as `unverified-identity`.
 - **Demo deny toggle** — subtract normally-allowed tools without any app change:
   ```bash
   AGENTIC_GOV_DENY_TOOLS="convertCurrency"   # comma-separated wire tool names; empty by default
@@ -182,4 +189,4 @@ pytest
 ## Versioning
 
 Semantic-ish: **+minor per slice**, **+major per completed group**, patch for fixes.
-Current: **0.2.1**. See `CHANGELOG.md`.
+Current: **0.3.0**. See `CHANGELOG.md`.

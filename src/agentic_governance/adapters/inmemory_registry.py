@@ -1,18 +1,29 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True)
-class VerifiedIdentity:
-    id: str | None
+from agentic_governance.adapters.identity_mandates import (
+    IdentityMandateConfig,
+    IdentityRecord,
+    Mandate,
+)
 
 
 class InMemoryIdentityRegistry:
-    async def verify(self, identity: str | None) -> VerifiedIdentity:
-        return VerifiedIdentity(id=identity)
+    """Verify trusted context identities against governance-owned records."""
+
+    def __init__(self, config: IdentityMandateConfig | None = None) -> None:
+        self._config = config or IdentityMandateConfig.from_environment()
+
+    async def verify(self, identity: str | None) -> IdentityRecord | None:
+        if identity is None:
+            return None
+        return self._config.identities.get(identity)
 
 
 class InMemoryMandateStore:
-    async def mandate_for(self, identity: str | None) -> dict:
-        return {"identity": identity, "scope": "global"}
+    """Retrieve machine-readable exact-pair capabilities by verified identity."""
+
+    def __init__(self, config: IdentityMandateConfig | None = None) -> None:
+        self._config = config or IdentityMandateConfig.from_environment()
+
+    async def mandate_for(self, identity: str) -> Mandate:
+        return self._config.mandates[identity]

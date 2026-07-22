@@ -7,6 +7,7 @@
 
 ## Versions
 
+- **0.3.0** — Slice 2 (verified agent identities + machine-readable per-identity mandates)
 - **0.2.2** — Audit `policyVersion` now reports the package version (removed internal slice labels from runtime data)
 - **0.2.1** — Audit sink writes a new timestamped file per run (`audit-<UTC>.jsonl`)
 - **0.2.0** — Slice 1 (least-privilege deny-unknown-tool allowlist + Deny path + demo trigger)
