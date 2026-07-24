@@ -413,18 +413,32 @@ class ContentHookRuntime:
         """Emit governance notices for fired content controls (if callback provided).
         
         Filtering rules:
-        - B1-B6: all non-skipped controls are shown
-        - skipped-disabled: never shown
+        - Only emit for ACTIONABLE results (meaningful actions taken)
+        - Suppress clean/no-op results (allowed, grounded, no-concerns, etc.)
         """
         if self._notice_callback is None:
             return
         if not disposition.fired_controls:
             return
         
+        # Actionable results for content controls
+        # Based on actual result strings in content_hooks.py:
+        # - B1: escalated, would-escalate (injection detected)
+        # - B2: transformed, would-transform (PII found)
+        # - B3: grounding-failed (grounding check failed)
+        # - B4: concerns-found (judge found issues)
+        # Suppress: allowed, grounded, no-concerns, skipped-disabled
+        ACTIONABLE_RESULTS = {
+            "escalated", "would-escalate",
+            "transformed", "would-transform",
+            "grounding-failed",
+            "concerns-found",
+        }
+        
         notices: list[str] = []
         for control in disposition.fired_controls:
-            # Skip skipped controls
-            if control.result == "skipped-disabled":
+            # Only emit for actionable results (suppress clean passes)
+            if control.result not in ACTIONABLE_RESULTS:
                 continue
             
             # Format the notice

@@ -768,27 +768,35 @@ class _GovernedMcpRuntime:
         """Emit governance notices for fired controls (if callback provided).
         
         Filtering rules:
-        - A6 (deterministic-disposition) never shown (too noisy, fires on every call)
-        - A1-A12: only when decision is Deny or Escalate
-        - skipped-disabled: never shown
+        - Only emit for ACTIONABLE results (meaningful actions taken)
+        - Suppress clean/no-op results (allowed, verified, observed, etc.)
+        - A6 always suppressed (too noisy, fires on every call)
         """
         if not disposition.fired_controls:
             return
         
+        # Actionable results that represent meaningful governance actions
+        # Based on actual result strings used in codebase:
+        # - Action controls: denied, would-deny, Deny, escalated, would-escalate, Escalate
+        # - Content controls: transformed, would-transform, escalated, would-escalate,
+        #   grounding-failed, concerns-found
+        ACTIONABLE_RESULTS = {
+            "denied", "would-deny", "Deny",
+            "escalated", "would-escalate", "Escalate",
+            "transformed", "would-transform",
+            "grounding-failed",
+            "concerns-found",
+        }
+        
         notices: list[str] = []
         for control in disposition.fired_controls:
-            # Skip A6 (too noisy)
+            # Skip A6 (always suppressed)
             if control.control_id == "A6":
                 continue
             
-            # Skip skipped controls
-            if control.result == "skipped-disabled":
+            # Only emit for actionable results (suppress clean passes)
+            if control.result not in ACTIONABLE_RESULTS:
                 continue
-            
-            # For A1-A12: only show when decision is Deny or Escalate
-            if control.control_id.startswith("A"):
-                if disposition.decision not in ("Deny", "Escalate"):
-                    continue
             
             # Format the notice
             notice = format_control_notice(
