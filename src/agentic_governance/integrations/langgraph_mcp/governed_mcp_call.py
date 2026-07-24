@@ -22,6 +22,7 @@ from agentic_governance.core.disposition import (
     deny,
     observe,
 )
+from agentic_governance.core.notice_formatter import format_control_notice
 from agentic_governance.core.engine import GovernanceEngine
 from agentic_governance.core.envelope import GovernanceEnvelope
 from agentic_governance.core.integrity import IntegrityEvaluator
@@ -54,6 +55,7 @@ class _GovernedMcpRuntime:
         audit_sink: Any | None = None,
         identity_registry: Any | None = None,
         mandate_store: Any | None = None,
+        notice_callback: Callable[[list[str]], None] | None = None,
     ) -> None:
         self._real_mcp_call_tool = real_mcp_call_tool
         self._providers = providers
@@ -78,6 +80,7 @@ class _GovernedMcpRuntime:
         self._schema_validator = SchemaValidator()
         self._counter_store = InMemoryCounterStore()
         self._pending_audit_events: list[tuple[GovernanceEnvelope, Disposition]] = []
+        self._notice_callback = notice_callback
 
     async def call(self, serverUrl: str, toolName: str, arguments: dict[str, Any] | None) -> Any:
         envelope = self._providers.build_envelope(serverUrl, toolName, arguments)
@@ -485,6 +488,11 @@ class _GovernedMcpRuntime:
         arguments: dict[str, Any] | None,
     ) -> Any:
         await self._record(envelope, disposition)
+        
+        # Emit governance notices (if callback provided)
+        if self._notice_callback is not None:
+            self._emit_notices(disposition)
+        
         if disposition.decision == "Deny":
             reason = disposition.reasons[0] if disposition.reasons else "denied"
             return {"error": reason, "decision": "Deny"}
@@ -756,6 +764,46 @@ class _GovernedMcpRuntime:
                 remaining.append((envelope, disposition))
         self._pending_audit_events = remaining
 
+    def _emit_notices(self, disposition: Disposition) -> None:
+        """Emit governance notices for fired controls (if callback provided).
+        
+        Filtering rules:
+        - A6 (deterministic-disposition) never shown (too noisy, fires on every call)
+        - A1-A12: only when decision is Deny or Escalate
+        - skipped-disabled: never shown
+        """
+        if not disposition.fired_controls:
+            return
+        
+        notices: list[str] = []
+        for control in disposition.fired_controls:
+            # Skip A6 (too noisy)
+            if control.control_id == "A6":
+                continue
+            
+            # Skip skipped controls
+            if control.result == "skipped-disabled":
+                continue
+            
+            # For A1-A12: only show when decision is Deny or Escalate
+            if control.control_id.startswith("A"):
+                if disposition.decision not in ("Deny", "Escalate"):
+                    continue
+            
+            # Format the notice
+            notice = format_control_notice(
+                control_id=control.control_id,
+                name=control.name,
+                result=control.result,
+                signal_value=getattr(control, "signal_value", None),
+                reason=None,
+            )
+            notices.append(notice)
+        
+        # Call the callback with the notice list
+        if notices:
+            self._notice_callback(notices)
+
 
 _RUNTIME: _GovernedMcpRuntime | None = None
 
@@ -772,6 +820,7 @@ def install(
     audit_sink: Any | None = None,
     identity_registry: Any | None = None,
     mandate_store: Any | None = None,
+    notice_callback: Callable[[list[str]], None] | None = None,
 ) -> Callable[[str, str, dict[str, Any] | None], Awaitable[Any]]:
     global _RUNTIME
     demo_identity_override = DemoIdentityOverrideConfig.from_environment()
@@ -795,6 +844,7 @@ def install(
         audit_sink=audit_sink,
         identity_registry=identity_registry,
         mandate_store=mandate_store,
+        notice_callback=notice_callback,
     )
     return governedMcpCallTool
 

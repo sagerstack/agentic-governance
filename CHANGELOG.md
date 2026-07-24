@@ -7,6 +7,7 @@
 
 ## Versions
 
+- **0.12.0** — Slice B-INT-2 D1 (Governance UI notices: canonical notice formatter `format_control_notice()` with A1-A12 + B1-B6 safeguard labels and action verbs, injected `notice_callback` on both `install()` and `install_content_hooks()`, dependency-injection pattern with NO app imports, filtering rules: A6 never, A1-A12 Deny/Escalate only, B1-B6 all non-skipped, 50+ unit tests)
 - **0.11.0** — Slice B-INT-1 (content governance composition root `install_content_hooks()` with graceful degradation for heavy deps, unified action+content audit sink, export from package __init__, unit tests for adapter wiring and audit unification)
 - **0.10.0** — Slice B3 (three-tier material explanations B6, ExplanationGenerator with quality gates, ExplanationRouter, GROUP B COMPLETE: B1-B6 all functional)
 - **0.9.0** — Slice B2 (grounded output validation B3, LLM-as-judge B4, graceful failure B5, post_model_check in ContentHookRuntime)

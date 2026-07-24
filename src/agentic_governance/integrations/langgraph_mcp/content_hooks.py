@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,7 @@ from agentic_governance.core.content_envelope import (
     build_content_envelope,
 )
 from agentic_governance.core.explanation_generator import ExplanationGenerator
+from agentic_governance.core.notice_formatter import format_control_notice
 
 
 @dataclass
@@ -94,6 +95,7 @@ class ContentHookRuntime:
         llm_judge: LlmJudge | None = None,
         failure_handler: GracefulFailureHandler | None = None,
         explanation_generator: ExplanationGenerator | None = None,
+        notice_callback: Callable[[list[str]], None] | None = None,
     ) -> None:
         self._policy = policy
         self._modes = ContentControlModeConfig.from_policy(policy)
@@ -104,6 +106,7 @@ class ContentHookRuntime:
         self._llm_judge = llm_judge
         self._failure_handler = failure_handler or GracefulFailureHandler()
         self._explanation_generator = explanation_generator or ExplanationGenerator()
+        self._notice_callback = notice_callback
 
     async def pre_model_check(
         self,
@@ -153,6 +156,9 @@ class ContentHookRuntime:
 
         # Emit audit entry (PII-safe via build_content_audit_entry)
         await self._emit_audit(envelope, disposition)
+
+        # Emit governance notices (if callback provided)
+        self._emit_notices(disposition)
 
         return _disposition_to_result(disposition, content)
 
@@ -295,6 +301,10 @@ class ContentHookRuntime:
                     result.explanation_audit = exp_audit.structured if exp_audit.quality_valid else None
         
         await self._emit_audit(envelope, disposition)
+        
+        # Emit governance notices (if callback provided)
+        self._emit_notices(disposition)
+        
         return result
 
     def _apply_b1(self, content: str, disposition: ContentDisposition) -> ContentDisposition:
@@ -398,6 +408,38 @@ class ContentHookRuntime:
                 policy_version=disposition.policy_version,
                 latency_ms=disposition.latency_ms,
             )
+
+    def _emit_notices(self, disposition: ContentDisposition) -> None:
+        """Emit governance notices for fired content controls (if callback provided).
+        
+        Filtering rules:
+        - B1-B6: all non-skipped controls are shown
+        - skipped-disabled: never shown
+        """
+        if self._notice_callback is None:
+            return
+        if not disposition.fired_controls:
+            return
+        
+        notices: list[str] = []
+        for control in disposition.fired_controls:
+            # Skip skipped controls
+            if control.result == "skipped-disabled":
+                continue
+            
+            # Format the notice
+            notice = format_control_notice(
+                control_id=control.control_id,
+                name=control.name,
+                result=control.result,
+                entity_types=control.entity_types,
+                signal_value=control.signal_value,
+            )
+            notices.append(notice)
+        
+        # Call the callback with the notice list
+        if notices:
+            self._notice_callback(notices)
 
     async def _emit_audit(
         self,

@@ -21,6 +21,7 @@ def install_content_hooks(
     *,
     policy: LoadedPolicy | None = None,
     audit_sink: Any | None = None,
+    notice_callback: Any | None = None,
 ) -> ContentHookRuntime:
     """Build ContentHookRuntime with all available B1-B6 content adapters.
     
@@ -33,6 +34,9 @@ def install_content_hooks(
                    CRITICAL: When integrating with Group A, pass the SAME sink
                    instance to both install() and install_content_hooks() to
                    achieve unified action + content audit with shared correlation IDs.
+        notice_callback: Optional callback for governance notices. When provided,
+                        receives list of formatted notice strings for each disposition.
+                        Signature: Callable[[list[str]], None]
     
     Returns:
         ContentHookRuntime instance (NOT a singleton — each graph creates its own).
@@ -146,4 +150,5 @@ def install_content_hooks(
         llm_judge=llm_judge,
         failure_handler=failure_handler,
         explanation_generator=explanation_generator,
+        notice_callback=notice_callback,
     )
