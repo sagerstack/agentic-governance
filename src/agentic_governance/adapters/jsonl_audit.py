@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from agentic_governance.core.disposition import Disposition
 from agentic_governance.core.envelope import GovernanceEnvelope
+from agentic_governance.core.content_envelope import ContentEnvelope, _stable_hash as _content_hash
+from agentic_governance.core.content_disposition import ContentDisposition as ContentDisposition_
 
 
 class JsonlAuditSink:
@@ -30,6 +32,11 @@ class JsonlAuditSink:
 
     async def append(self, envelope: GovernanceEnvelope, disposition: Disposition) -> None:
         entry = build_audit_entry(envelope, disposition)
+        with self._path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, sort_keys=True) + "\n")
+
+    async def append_content(self, envelope: ContentEnvelope, disposition: ContentDisposition_) -> None:
+        entry = build_content_audit_entry(envelope, disposition)
         with self._path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, sort_keys=True) + "\n")
 
@@ -80,4 +87,42 @@ def build_audit_entry(envelope: GovernanceEnvelope, disposition: Disposition) ->
             "graphStateSnapshotRef": envelope.context_metadata.get("graphStateSnapshotRef"),
             "extractedReceiptRef": envelope.context_metadata.get("extractedReceiptRef"),
         },
+    }
+
+
+def build_content_audit_entry(
+    envelope: ContentEnvelope,
+    disposition: ContentDisposition_,
+) -> dict[str, Any]:
+    """Build a PII-safe audit entry for a content governance decision."""
+    content_transformed_ref = None
+    if disposition.decision == "Transform" and disposition.content_out is not None:
+        content_transformed_ref = _content_hash(disposition.content_out)
+    
+    return {
+        "entryId": str(uuid4()),
+        "contentId": envelope.content_id,
+        "correlationId": envelope.correlation_id,
+        "agentIdentity": envelope.agent_identity,
+        "contentType": envelope.content_type,
+        "contentRef": envelope.content_ref,          # hash, not raw
+        "contentTransformedRef": content_transformed_ref,  # hash of transformed, not raw
+        "disposition": {
+            "decision": disposition.decision,
+            "reasons": list(disposition.reasons),
+            "firedControls": [
+                {
+                    "controlId": c.control_id,
+                    "name": c.name,
+                    "result": c.result,
+                    "signalValue": c.signal_value,
+                    "entityTypes": list(c.entity_types),
+                }
+                for c in disposition.fired_controls
+            ],
+            "policyVersion": disposition.policy_version,
+            "latencyMs": disposition.latency_ms,
+        },
+        "contextMetadata": envelope.context_metadata,
+        "prevEntryHash": None,
     }

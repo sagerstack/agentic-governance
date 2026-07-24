@@ -244,5 +244,13 @@
         {"declared": "claimId", "trusted": "dbClaimId", "operator": "integer", "required": true}
       ]
     }
-  ]
+  ],
+  "contentControls": {
+    "B1": {"name": "input-attack-detection", "modeEnv": "AGENTIC_GOV_ENABLE_B1", "defaultMode": "observe"},
+    "B2": {"name": "pii-minimization", "modeEnv": "AGENTIC_GOV_ENABLE_B2", "defaultMode": "enforce"},
+    "B3": {"name": "grounded-output-validation", "modeEnv": "AGENTIC_GOV_ENABLE_B3", "defaultMode": "enforce"},
+    "B4": {"name": "llm-judge", "modeEnv": "AGENTIC_GOV_ENABLE_B4", "defaultMode": "observe"},
+    "B5": {"name": "graceful-failure", "modeEnv": "AGENTIC_GOV_ENABLE_B5", "defaultMode": "enforce"},
+    "B6": {"name": "material-explanations", "modeEnv": "AGENTIC_GOV_ENABLE_B6", "defaultMode": "enforce"}
+  }
 }

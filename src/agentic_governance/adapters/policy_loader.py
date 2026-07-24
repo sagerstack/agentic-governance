@@ -31,9 +31,11 @@ _REQUIRED_SECTIONS = {
     "exposure",
     "rate",
     "evidence",
+    "contentControls",
 }
 _SUPPORTED_OPERATORS = {"exact", "currency", "integer", "decimal", "normalizedText"}
 _REQUIRED_CONTROLS = {"A2", "A3", "A4", "A5", "A7", "A8", "A9", "A10", "A12"}
+_REQUIRED_CONTENT_CONTROLS = {"B1", "B2", "B3", "B4", "B5", "B6"}
 _VALID_BREACH_DISPOSITIONS = {"Deny", "Escalate"}
 
 
@@ -62,6 +64,7 @@ class LoadedPolicy:
     rate_rules: tuple[RateRule, ...]
     evidence_rules: tuple[EvidenceRule, ...]
     controls: Mapping[str, ControlSpec]
+    content_controls: Mapping[str, ControlSpec]
     simulated_tampers: frozenset[tuple[str, str]]
     source: str
 
@@ -109,6 +112,7 @@ def load_policy(environ: Mapping[str, str] | None = None) -> LoadedPolicy:
     exposure_rules = _load_exposure_rules(document["exposure"], servers, identity_ids)
     rate_rules = _load_rate_rules(document["rate"], servers, identity_ids)
     evidence_rules = _load_evidence_rules(document["evidence"], servers, identity_ids)
+    content_controls = _load_content_controls(document["contentControls"])
     simulated_tampers = _load_simulated_tampers(env, integrity_rules)
     return LoadedPolicy(
         servers=servers,
@@ -122,6 +126,7 @@ def load_policy(environ: Mapping[str, str] | None = None) -> LoadedPolicy:
         rate_rules=rate_rules,
         evidence_rules=evidence_rules,
         controls=controls,
+        content_controls=content_controls,
         simulated_tampers=simulated_tampers,
         source=source,
     )
@@ -161,6 +166,29 @@ def _load_controls(raw: Any) -> dict[str, ControlSpec]:
             raise PolicyConfigError(f"control {control_id} requires name and modeEnv")
         if default_mode not in {"enforce", "observe", "off"}:
             raise PolicyConfigError(f"control {control_id} has invalid defaultMode")
+        controls[control_id] = ControlSpec(control_id, name, mode_env, default_mode)
+    return controls
+
+
+def _load_content_controls(raw: Any) -> dict[str, ControlSpec]:
+    if not isinstance(raw, dict):
+        raise PolicyConfigError("contentControls must be an object")
+    missing = _REQUIRED_CONTENT_CONTROLS - raw.keys()
+    if missing:
+        raise PolicyConfigError(f"contentControls missing required entries: {sorted(missing)}")
+    controls: dict[str, ControlSpec] = {}
+    for control_id, spec in raw.items():
+        if not isinstance(spec, dict):
+            raise PolicyConfigError(f"contentControl {control_id} must be an object")
+        name, mode_env, default_mode = (
+            spec.get("name"),
+            spec.get("modeEnv"),
+            spec.get("defaultMode"),
+        )
+        if not all(isinstance(value, str) and value for value in (name, mode_env)):
+            raise PolicyConfigError(f"contentControl {control_id} requires name and modeEnv")
+        if default_mode not in {"enforce", "observe", "off"}:
+            raise PolicyConfigError(f"contentControl {control_id} has invalid defaultMode")
         controls[control_id] = ControlSpec(control_id, name, mode_env, default_mode)
     return controls
 
