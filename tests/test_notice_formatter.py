@@ -43,23 +43,29 @@ def test_redacted_verbs_map_to_redacted():
 
 
 def test_escalated_verbs_map_to_escalated():
-    """escalate/escalated/would-escalate → Escalated"""
+    """escalate/escalated → Escalated; would-escalate → Flagged"""
     assert ACTION_VERBS["escalate"] == "Escalated"
     assert ACTION_VERBS["escalated"] == "Escalated"
-    assert ACTION_VERBS["would-escalate"] == "Escalated"
+    assert ACTION_VERBS["would-escalate"] == "Flagged"
 
 
 def test_blocked_verbs_map_to_blocked():
-    """deny/denied/blocked/would-deny → Blocked"""
+    """deny/denied/blocked → Blocked; would-deny → Flagged"""
     assert ACTION_VERBS["deny"] == "Blocked"
     assert ACTION_VERBS["denied"] == "Blocked"
     assert ACTION_VERBS["blocked"] == "Blocked"
-    assert ACTION_VERBS["would-deny"] == "Blocked"
+    assert ACTION_VERBS["would-deny"] == "Flagged"
 
 
 def test_skipped_verb_maps_to_skipped():
     """skipped-disabled → Skipped"""
     assert ACTION_VERBS["skipped-disabled"] == "Skipped"
+
+
+def test_flagged_verbs_for_observe_mode():
+    """would-escalate/would-deny → Flagged (observe-mode verb)"""
+    assert ACTION_VERBS["would-escalate"] == "Flagged"
+    assert ACTION_VERBS["would-deny"] == "Flagged"
 
 
 # Test: Basic format (no details)
@@ -183,21 +189,21 @@ def test_b1_with_none_signal_value():
 # Test: Observe mode suffix
 
 def test_observe_mode_with_would_escalate():
-    """would-escalate in observe mode adds (observe) suffix"""
+    """would-escalate in observe mode → Flagged (observe)"""
     notice = format_control_notice(
         "A7", "exposure-limits", "would-escalate",
         mode="observe"
     )
-    assert notice == "Governance control A7 — Exposure limit. Escalated (observe)"
+    assert notice == "Governance control A7 — Exposure limit. Flagged (observe)"
 
 
 def test_observe_mode_with_would_deny():
-    """would-deny in observe mode adds (observe) suffix"""
+    """would-deny in observe mode → Flagged (observe)"""
     notice = format_control_notice(
         "A2", "envelope-integrity", "would-deny",
         mode="observe"
     )
-    assert notice == "Governance control A2 — Payload integrity. Blocked (observe)"
+    assert notice == "Governance control A2 — Payload integrity. Flagged (observe)"
 
 
 def test_enforce_mode_no_observe_suffix():
@@ -207,16 +213,30 @@ def test_enforce_mode_no_observe_suffix():
         mode="enforce"
     )
     # In enforce mode, would-* shouldn't happen, but if it does, no (observe) suffix
-    assert notice == "Governance control A7 — Exposure limit. Escalated"
+    # would-escalate maps to "Flagged" (observe-mode verb)
+    assert notice == "Governance control A7 — Exposure limit. Flagged"
 
 
 def test_observe_mode_with_non_would_result():
-    """observe mode with non-would-* result does NOT add suffix"""
+    """observe mode with enforce-mode result (escalated) does NOT add suffix"""
     notice = format_control_notice(
         "A7", "exposure-limits", "escalated",
         mode="observe"
     )
+    # escalated (enforce-mode result) → Escalated, no suffix needed
     assert notice == "Governance control A7 — Exposure limit. Escalated"
+
+
+def test_b1_observe_mode_with_signal_value():
+    """B1 would-escalate in observe mode with signal value → Flagged (99.99%, observe)"""
+    notice = format_control_notice(
+        "B1", "input-attack-detection", "would-escalate",
+        signal_value=0.9999,
+        mode="observe"
+    )
+    # Per team-lead's locked Q3 decision: would-escalate → "Flagged"
+    # With signal value + observe mode → "Flagged (99.99%, observe)"
+    assert notice == "Governance control B1 — Prompt injection. Flagged (99.99%, observe)"
 
 
 # Test: Complete examples from scope doc

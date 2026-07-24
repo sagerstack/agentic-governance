@@ -41,11 +41,11 @@ ACTION_VERBS: dict[str, str] = {
     "would-transform": "Redacted",
     "escalate": "Escalated",
     "escalated": "Escalated",
-    "would-escalate": "Escalated",
+    "would-escalate": "Flagged",
     "deny": "Blocked",
     "denied": "Blocked",
     "blocked": "Blocked",
-    "would-deny": "Blocked",
+    "would-deny": "Flagged",
     "skipped-disabled": "Skipped",
 }
 
@@ -89,7 +89,7 @@ def format_control_notice(
         'Governance control A5 — Tool allowlist. Blocked'
         
         >>> format_control_notice("A7", "exposure-limits", "would-escalate", mode="observe")
-        'Governance control A7 — Exposure limit. Escalated (observe)'
+        'Governance control A7 — Exposure limit. Flagged (observe)'
     """
     # Resolve safeguard label (fallback to name if control_id unknown)
     safeguard = SAFEGUARD_LABELS.get(control_id, name)
