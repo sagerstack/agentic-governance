@@ -7,6 +7,7 @@
 
 ## Versions
 
+- **0.11.0** — Slice B-INT-1 (content governance composition root `install_content_hooks()` with graceful degradation for heavy deps, unified action+content audit sink, export from package __init__, unit tests for adapter wiring and audit unification)
 - **0.10.0** — Slice B3 (three-tier material explanations B6, ExplanationGenerator with quality gates, ExplanationRouter, GROUP B COMPLETE: B1-B6 all functional)
 - **0.9.0** — Slice B2 (grounded output validation B3, LLM-as-judge B4, graceful failure B5, post_model_check in ContentHookRuntime)
 - **0.8.0** — Slice B1 (input attack detection B1 via DeBERTa stub, PII input minimization B2 via Presidio stub, ContentHookRuntime pre_model_check)
