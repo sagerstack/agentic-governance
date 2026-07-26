@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import logging
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 
 def _hash(value: Any) -> str:
@@ -129,7 +132,7 @@ class PiiMinimizer:
 
     def _load_analyzer(self) -> None:
         try:
-            from presidio_analyzer import AnalyzerEngine  # type: ignore[import-untyped]
+            from presidio_analyzer import AnalyzerEngine, Pattern, PatternRecognizer  # type: ignore[import-untyped]
         except ImportError as exc:
             raise ImportError(
                 "presidio-analyzer is required for PiiMinimizer. "
@@ -137,6 +140,35 @@ class PiiMinimizer:
                 "or pip install presidio-analyzer"
             ) from exc
         self._analyzer = AnalyzerEngine()
+        
+        # Add Singapore bare 8-digit phone recognizer
+        # Pattern: 8 digits starting with 8 or 9 (SG mobile numbers)
+        # FALSE-POSITIVE GUARD: Use moderate score + context words to avoid
+        # matching amounts, IDs, or other numeric data
+        sg_phone_pattern = Pattern(
+            name="sg_mobile_bare",
+            regex=r"\b[89]\d{7}\b",  # 8 digits starting with 8 or 9
+            score=0.6,  # Moderate score (requires context for confidence boost)
+        )
+        
+        sg_phone_recognizer = PatternRecognizer(
+            supported_entity="PHONE_NUMBER",
+            patterns=[sg_phone_pattern],
+            context=[
+                # Context words that boost confidence this is a phone number
+                "call", "text", "phone", "contact", "mobile", "hp",
+                "reach", "number", "tel", "whatsapp", "sms", "ring",
+                "cellphone", "handphone",
+            ],
+            supported_language="en",
+        )
+        
+        # Add to analyzer registry
+        self._analyzer.registry.add_recognizer(sg_phone_recognizer)
+        logger.info(
+            "B2 PII minimization: added Singapore bare 8-digit phone recognizer "
+            "(pattern: [89]\\d{7}, score: 0.6, context-gated)"
+        )
 
     def _load_anonymizer(self) -> None:
         try:

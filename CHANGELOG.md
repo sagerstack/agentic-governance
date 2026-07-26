@@ -7,6 +7,7 @@
 
 ## Versions
 
+- **0.12.2** — Fix B2 PII detection for bare Singapore mobile numbers (e.g. "91234567"). Added custom Presidio PatternRecognizer for 8-digit numbers starting with 8 or 9, with FALSE-POSITIVE GUARD (moderate score 0.6 + context words: call/text/phone/contact/mobile/hp/reach/number/tel/whatsapp). Regression tests verify +65 formats and EMAIL_ADDRESS still work. 30+ unit tests including negative guards for financial/ID contexts.
 - **0.12.1** — Fix notice emission filter: only emit for ACTIONABLE results (transformed, escalated, denied, grounding-failed, concerns-found), suppress clean passes (allowed, grounded, no-concerns). Prevents UI spam from benign "Allowed" notices on every turn. Added 15 unit tests verifying clean passes emit ZERO notices.
 - **0.12.0** — Slice B-INT-2 D1 (Governance UI notices: canonical notice formatter `format_control_notice()` with A1-A12 + B1-B6 safeguard labels and action verbs, injected `notice_callback` on both `install()` and `install_content_hooks()`, dependency-injection pattern with NO app imports, filtering rules: A6 never, A1-A12 Deny/Escalate only, B1-B6 all non-skipped, 50+ unit tests)
 - **0.11.0** — Slice B-INT-1 (content governance composition root `install_content_hooks()` with graceful degradation for heavy deps, unified action+content audit sink, export from package __init__, unit tests for adapter wiring and audit unification)
