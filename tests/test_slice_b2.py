@@ -186,12 +186,25 @@ async def test_llm_judge_enforce_no_b3_finding_does_not_escalate(policy_env, mon
 
 @pytest.mark.asyncio
 async def test_llm_judge_off_mode_skips(policy_env, monkeypatch):
+    """B4 is now extracted to judge() method; post_model_check no longer runs B4.
+    
+    When B4 mode is "off", judge() returns an empty critique with skipped audit.
+    post_model_check should NOT have any B4 fired controls.
+    """
     monkeypatch.setenv("AGENTIC_GOV_ENABLE_B4", "off")
     stub = StubLlmJudge(concerns=("huge concern",))
     runtime = _make_runtime(llm_judge=stub)
     result = await runtime.post_model_check("output", content_type="model_output", correlation_id="t3", agent_identity="advisor")
+    # B4 is no longer in post_model_check (extracted to judge() method)
     b4 = [c for c in result.fired_controls if c["controlId"] == "B4"]
-    assert b4[0]["result"] == "skipped-disabled"
+    assert len(b4) == 0, "B4 should NOT be in post_model_check fired_controls (extracted to judge())"
+    
+    # Verify judge() method handles the off mode
+    from agentic_governance.adapters.llm_judge import JudgeCritique
+    critique = await runtime.judge("output", correlation_id="t3", agent_identity="advisor")
+    assert critique is not None
+    assert len(critique.concerns) == 0
+    assert critique.confidence is None
 
 
 @pytest.mark.asyncio

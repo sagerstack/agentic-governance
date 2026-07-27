@@ -7,6 +7,7 @@
 
 ## Versions
 
+- **0.12.2** — Phase 4 B4: extract LLM-as-judge into async `judge()` method on ContentHookRuntime (runs OUT of sync latency path); allow app to inject a pre-built LlmJudge via `install_content_hooks(llm_judge=...)`; remove inline B4 from `post_model_check` (avoids double-run); B4 emits audit entries (PII-safe, unified sink) and returns critique; observe/escalate-only (never blocks); B5 graceful-failure on judge exceptions. 12+ unit tests.
 - **0.12.1** — Fix notice emission filter: only emit for ACTIONABLE results (transformed, escalated, denied, grounding-failed, concerns-found), suppress clean passes (allowed, grounded, no-concerns). Prevents UI spam from benign "Allowed" notices on every turn. Added 15 unit tests verifying clean passes emit ZERO notices.
 - **0.12.0** — Slice B-INT-2 D1 (Governance UI notices: canonical notice formatter `format_control_notice()` with A1-A12 + B1-B6 safeguard labels and action verbs, injected `notice_callback` on both `install()` and `install_content_hooks()`, dependency-injection pattern with NO app imports, filtering rules: A6 never, A1-A12 Deny/Escalate only, B1-B6 all non-skipped, 50+ unit tests)
 - **0.11.0** — Slice B-INT-1 (content governance composition root `install_content_hooks()` with graceful degradation for heavy deps, unified action+content audit sink, export from package __init__, unit tests for adapter wiring and audit unification)

@@ -22,6 +22,7 @@ def install_content_hooks(
     policy: LoadedPolicy | None = None,
     audit_sink: Any | None = None,
     notice_callback: Any | None = None,
+    llm_judge: Any | None = None,
 ) -> ContentHookRuntime:
     """Build ContentHookRuntime with all available B1-B6 content adapters.
     
@@ -37,6 +38,11 @@ def install_content_hooks(
         notice_callback: Optional callback for governance notices. When provided,
                         receives list of formatted notice strings for each disposition.
                         Signature: Callable[[list[str]], None]
+        llm_judge: Optional pre-built LlmJudge instance for B4 (LLM-as-judge).
+                   If None, B4 stays inert (llm_client=None, no-op). Pass a
+                   real LlmJudge with an OpenRouter-backed llm_client to wire
+                   B4 into the async judge() method. The judge is invoked
+                   async (off the sync latency path) via ContentHookRuntime.judge().
     
     Returns:
         ContentHookRuntime instance (NOT a singleton — each graph creates its own).
@@ -102,17 +108,24 @@ def install_content_hooks(
     
     # B4: LlmJudge (observe-only LLM critique)
     # No heavy deps — llm_client is None by default, which LlmJudge handles gracefully
-    llm_judge = None
-    try:
-        from agentic_governance.adapters.llm_judge import LlmJudge
-        # LlmJudge with llm_client=None returns empty critiques (safe fallback)
-        llm_judge = LlmJudge(llm_client=None)
-    except Exception as exc:
-        logger.warning(
-            "B4 llm-judge: failed to initialize LlmJudge, control will be skipped. "
-            "Error: %s",
-            exc,
-        )
+    # If the app passes a pre-built llm_judge (with an OpenRouter-backed client), use it.
+    # Otherwise, build an inert LlmJudge (llm_client=None → returns empty critiques).
+    if llm_judge is None:
+        try:
+            from agentic_governance.adapters.llm_judge import LlmJudge
+            # LlmJudge with llm_client=None returns empty critiques (safe fallback)
+            llm_judge = LlmJudge(llm_client=None)
+            logger.info(
+                "B4 (LLM judge): built inert LlmJudge (llm_client=None). "
+                "To wire B4, pass a pre-built LlmJudge with a real client to install_content_hooks()."
+            )
+        except Exception as exc:
+            logger.warning(
+                "B4 llm-judge: failed to initialize LlmJudge, control will be skipped. "
+                "Error: %s",
+                exc,
+            )
+            llm_judge = None
     
     # B5: GracefulFailureHandler (structured failure handling)
     # No heavy deps — always instantiate
