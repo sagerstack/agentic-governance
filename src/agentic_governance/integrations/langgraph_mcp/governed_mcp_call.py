@@ -12,7 +12,8 @@ from agentic_governance.adapters.identity_mandates import (
     IdentityMandateConfig,
 )
 from agentic_governance.adapters.inmemory_registry import InMemoryIdentityRegistry, InMemoryMandateStore
-from agentic_governance.adapters.jsonl_audit import JsonlAuditSink
+from agentic_governance.adapters.jsonl_audit import JsonlAuditSink, build_failure_audit_event
+from agentic_governance._version import PACKAGE_VERSION
 from agentic_governance.adapters.pdp_python import DeterministicPolicyDecisionPoint
 from agentic_governance.adapters.policy_loader import load_policy
 from agentic_governance.core.disposition import (
@@ -760,7 +761,19 @@ class _GovernedMcpRuntime:
         for envelope, disposition in self._pending_audit_events:
             try:
                 await self._audit_sink.append(envelope, disposition)
-            except Exception:
+            except Exception as exc:
+                if hasattr(self._audit_sink, "record_failure_event"):
+                    self._audit_sink.record_failure_event(
+                        build_failure_audit_event(
+                            claim_id=envelope.correlation_id,
+                            correlation_id=envelope.correlation_id,
+                            db_claim_id=envelope.trusted_context.get("dbClaimId"),
+                            component="action_audit_append",
+                            error=str(exc),
+                            details={"toolName": envelope.tool_name},
+                            policy_version=PACKAGE_VERSION,
+                        )
+                    )
                 remaining.append((envelope, disposition))
         self._pending_audit_events = remaining
 

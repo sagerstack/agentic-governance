@@ -6,7 +6,7 @@ from importlib.metadata import PackageNotFoundError, version
 
 
 # Kept as a fallback for source-tree execution where distribution metadata is absent.
-__version__ = "0.13.0"
+__version__ = "0.14.0"
 
 
 def package_version() -> str:

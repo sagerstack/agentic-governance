@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 from agentic_governance.adapters.content_control_modes import ContentControlModeConfig
 from agentic_governance.adapters.grounding_validator import GroundingValidator
 from agentic_governance.adapters.input_attack_detector import InputAttackDetector
-from agentic_governance.adapters.jsonl_audit import JsonlAuditSink, build_content_audit_entry
+from agentic_governance.adapters.jsonl_audit import JsonlAuditSink, build_content_audit_entry, build_failure_audit_event
 from agentic_governance.adapters.llm_judge import JudgeCritique, LlmJudge
 from agentic_governance.adapters.pii_minimizer import PiiMinimizer
 from agentic_governance.adapters.policy_loader import LoadedPolicy, load_policy
@@ -593,6 +593,18 @@ class ContentHookRuntime:
             # Audit failures must not break the content pipeline, but they
             # must be observable (logged at WARNING) so operators can detect
             # misconfigured sinks (permissions, disk full, serialization bugs).
+            if hasattr(self._audit_sink, "record_failure_event"):
+                self._audit_sink.record_failure_event(
+                    build_failure_audit_event(
+                        claim_id=envelope.correlation_id,
+                        correlation_id=envelope.correlation_id,
+                        db_claim_id=envelope.context_metadata.get("dbClaimId"),
+                        component="content_audit_append",
+                        error=str(exc),
+                        details={"contentType": envelope.content_type, "agentIdentity": envelope.agent_identity},
+                        policy_version=PACKAGE_VERSION,
+                    )
+                )
             logger.warning(
                 "content audit emission failed for %s: %s",
                 envelope.content_id,
