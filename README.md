@@ -119,6 +119,18 @@ Package layout (`src/agentic_governance/`):
 `core/` and `ports/` import nothing application-specific. All app knowledge lives in an
 injected adapter — see integration below.
 
+### Audit integrity helpers
+
+The canonical JSONL audit spine is the stronger forensic source for Group D. The package
+also exposes read-side helpers to verify and reconstruct it deterministically:
+
+- `verify_audit_chain(...)` — recompute `entryHash` and validate `prevEntryHash`
+- `reconstruct_claim_audit(...)` — rebuild a claim timeline from canonical JSONL alone
+- `load_failure_records(...)` — read best-effort `*.failures.jsonl` fallback events
+
+Use these helpers to treat the DB `audit_log` as an operational projection, not the sole
+source of truth.
+
 ---
 
 ## Integrating with another agentic application

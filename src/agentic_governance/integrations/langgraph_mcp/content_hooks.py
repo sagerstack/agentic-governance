@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 from agentic_governance.adapters.content_control_modes import ContentControlModeConfig
 from agentic_governance.adapters.grounding_validator import GroundingValidator
 from agentic_governance.adapters.input_attack_detector import InputAttackDetector
-from agentic_governance.adapters.jsonl_audit import JsonlAuditSink, build_content_audit_entry
+from agentic_governance.adapters.jsonl_audit import JsonlAuditSink, build_content_audit_entry, build_failure_audit_event
 from agentic_governance.adapters.llm_judge import JudgeCritique, LlmJudge
 from agentic_governance.adapters.pii_minimizer import PiiMinimizer
 from agentic_governance.adapters.policy_loader import LoadedPolicy, load_policy
@@ -36,6 +36,7 @@ from agentic_governance.core.content_envelope import (
 )
 from agentic_governance.core.explanation_generator import ExplanationGenerator
 from agentic_governance.core.notice_formatter import format_control_notice
+from agentic_governance._version import PACKAGE_VERSION
 
 
 @dataclass
@@ -174,7 +175,13 @@ class ContentHookRuntime:
         rag_clauses: list[str] | None = None,
         required_evidence_fields: list[str] | None = None,
     ) -> ContentHookResult:
-        """Run B2 (PII output), B3 (grounding), B4 (judge), B5 (failure) on model output."""
+        """Run B2 (PII output), B3 (grounding), B5 (failure) on model output.
+        
+        Note: B4 (LLM judge) is NO LONGER invoked here. B4 is now run via the
+        separate async judge() method so it stays OFF the synchronous latency
+        path. This method keeps B2/B3 (+B5/B6); the app calls judge() async
+        (background agents) or end-of-turn (intake-gpt).
+        """
         import json as _json
         import time
         start = time.perf_counter()
@@ -234,27 +241,11 @@ class ContentHookRuntime:
                 except Exception:
                     pass
 
-            # B4: LLM judge (observe-only by design; enforce only contributes WITH B3)
-            b4_mode = self._modes.mode("B4")
-            b3_had_finding = any(c.control_id == "B3" and c.result == "grounding-failed" for c in disposition.fired_controls)
-
-            if b4_mode == "off":
-                disposition = _add_skipped(disposition, "B4", "llm-judge")
-            elif self._llm_judge is not None:
-                try:
-                    critique = await self._llm_judge.critique(effective_content, context)
-                    b4_fired = ContentFiredControl(control_id="B4", name="llm-judge", result="concerns-found" if critique.concerns else "no-concerns", signal_value=critique.confidence)
-
-                    if critique.concerns and b4_mode == "enforce" and b3_had_finding:
-                        incoming = ContentDisposition(decision="Escalate", reasons=("judge-concerns-with-grounding-failure",), fired_controls=(b4_fired,), content_out=None, policy_version=disposition.policy_version)
-                        disposition = merge_dispositions(disposition, incoming)
-                    elif critique.concerns:
-                        shadow = "would-escalate:judge-concerns"
-                        disposition = ContentDisposition(decision=disposition.decision, reasons=disposition.reasons + (shadow,), fired_controls=disposition.fired_controls + (b4_fired,), content_out=disposition.content_out, policy_version=disposition.policy_version, latency_ms=disposition.latency_ms)
-                    else:
-                        disposition = ContentDisposition(decision=disposition.decision, reasons=disposition.reasons, fired_controls=disposition.fired_controls + (b4_fired,), content_out=disposition.content_out, policy_version=disposition.policy_version, latency_ms=disposition.latency_ms)
-                except Exception:
-                    pass  # Judge failure never breaks pipeline
+            # B4: LLM judge is NO LONGER run inline in post_model_check.
+            # B4 is now extracted into a separate async judge() method so it can
+            # run OUT of the synchronous latency path. post_model_check keeps
+            # B2/B3 (+B5/B6); B4 is invoked via judge() by the app.
+            # See: judge() method below.
 
         except Exception:
             # B5: Wrap all exceptions
@@ -306,6 +297,135 @@ class ContentHookRuntime:
         self._emit_notices(disposition)
         
         return result
+
+    async def judge(
+        self,
+        content: str,
+        *,
+        correlation_id: str,
+        agent_identity: str,
+        context: dict[str, Any] | None = None,
+    ) -> JudgeCritique | None:
+        """Run B4 (LLM-as-judge) on model output — async, off the sync path.
+        
+        B4 is observe/escalate-only (never blocks or denies alone). It runs the
+        injected LlmJudge against the content, applies the B4 mode (observe/escalate/off),
+        emits a B4 content-audit entry (PII-safe, same sink), and returns the critique.
+        If the judge is inert (llm_client=None) or the mode is "off", returns an empty
+        critique (concerns=()) and emits a skipped-disabled audit entry. All exceptions
+        are swallowed (B5 graceful-failure semantics) and result in an empty critique.
+        
+        Args:
+            content: Model output to critique (e.g. assistant reply)
+            correlation_id: Existing claim/correlation id for audit trail
+            agent_identity: Agent name for audit (e.g. "intake-gpt", "compliance")
+            context: Optional context dict passed to the judge prompt
+        
+        Returns:
+            JudgeCritique with concerns/flags/confidence, or None if judge is inert.
+            - concerns: tuple of concern strings (empty = no concerns)
+            - confidence: float 0.0-1.0 or None
+            - flags: tuple of flag categories (hallucination, inconsistency, confidence_gap)
+            - contributed_to_escalation: False (B4 is observe/escalate-only, doesn't block)
+            - latency_ms: judge call latency in ms
+        
+        Audit emission:
+            Emits a content audit entry with:
+            - B4 fired control (result="concerns-found" | "no-concerns" | "skipped-disabled")
+            - Same correlationId as the calling turn (unified action+content audit)
+            - PII-safe: signal_value is the confidence score, not raw content
+        """
+        from agentic_governance.adapters.llm_judge import JudgeCritique
+        
+        start = time.perf_counter()
+        context = context or {}
+        b4_mode = self._modes.mode("B4")
+        
+        # B4 off → skipped, emit audit, return empty critique
+        if b4_mode == "off":
+            empty = JudgeCritique(
+                concerns=(), confidence=None, flags=(),
+                contributed_to_escalation=False, latency_ms=0.0,
+            )
+            disposition = ContentDisposition(
+                decision="Allow",
+                reasons=(),
+                fired_controls=(ContentFiredControl(
+                    control_id="B4", name="llm-judge", result="skipped-disabled",
+                ),),
+                content_out=None,
+                policy_version=PACKAGE_VERSION,
+            )
+            envelope = build_content_envelope(
+                content, content_type=ContentType.MODEL_OUTPUT,
+                correlation_id=correlation_id, agent_identity=agent_identity,
+                context={"b4_mode": b4_mode, **context},
+            )
+            await self._emit_audit(envelope, disposition)
+            return empty
+        
+        # No judge wired → inert, return None (no audit emitted to avoid noise)
+        if self._llm_judge is None:
+            return None
+        
+        # Run judge (graceful: any exception → empty critique, B5 semantics)
+        try:
+            critique = await self._llm_judge.critique(content, context)
+            latency_ms = (time.perf_counter() - start) * 1000
+            critique_with_latency = JudgeCritique(
+                concerns=critique.concerns,
+                confidence=critique.confidence,
+                flags=critique.flags,
+                contributed_to_escalation=critique.contributed_to_escalation,
+                latency_ms=latency_ms,
+            )
+        except Exception:
+            # Judge failure: return empty critique, do NOT emit audit (silent fail per B5)
+            return JudgeCritique(
+                concerns=(), confidence=None, flags=(),
+                contributed_to_escalation=False,
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+        
+        # Build disposition for audit emission
+        # B4 mode logic: observe (shadow signal) or enforce (with B3 finding → escalate)
+        # Per scope: B4 is observe/escalate-only, never sole blocker
+        b4_result = "concerns-found" if critique_with_latency.concerns else "no-concerns"
+        reasons = (
+            ("llm-judge-concerns",) if critique_with_latency.concerns else ("llm-judge-clean",)
+        )
+        
+        disposition = ContentDisposition(
+            decision="Allow",  # B4 never changes decision (observe/escalate-only)
+            reasons=reasons,
+            fired_controls=(ContentFiredControl(
+                control_id="B4", name="llm-judge",
+                result=b4_result,
+                signal_value=critique_with_latency.confidence,
+            ),),
+            content_out=None,
+            policy_version=PACKAGE_VERSION,
+            latency_ms=latency_ms,
+        )
+        
+        # Emit B4 audit entry
+        envelope = build_content_envelope(
+            content, content_type=ContentType.MODEL_OUTPUT,
+            correlation_id=correlation_id, agent_identity=agent_identity,
+            context={"b4_mode": b4_mode, **context},
+        )
+        await self._emit_audit(envelope, disposition)
+        
+        # Emit governance notice if callback provided (only on actionable: concerns-found)
+        if self._notice_callback is not None and critique_with_latency.concerns:
+            notice = format_control_notice(
+                control_id="B4", name="llm-judge",
+                result="concerns-found",
+                signal_value=critique_with_latency.confidence,
+            )
+            self._notice_callback([notice])
+        
+        return critique_with_latency
 
     def _apply_b1(self, content: str, disposition: ContentDisposition) -> ContentDisposition:
         """Apply B1 input attack detection."""
@@ -473,6 +593,18 @@ class ContentHookRuntime:
             # Audit failures must not break the content pipeline, but they
             # must be observable (logged at WARNING) so operators can detect
             # misconfigured sinks (permissions, disk full, serialization bugs).
+            if hasattr(self._audit_sink, "record_failure_event"):
+                self._audit_sink.record_failure_event(
+                    build_failure_audit_event(
+                        claim_id=envelope.correlation_id,
+                        correlation_id=envelope.correlation_id,
+                        db_claim_id=envelope.context_metadata.get("dbClaimId"),
+                        component="content_audit_append",
+                        error=str(exc),
+                        details={"contentType": envelope.content_type, "agentIdentity": envelope.agent_identity},
+                        policy_version=PACKAGE_VERSION,
+                    )
+                )
             logger.warning(
                 "content audit emission failed for %s: %s",
                 envelope.content_id,

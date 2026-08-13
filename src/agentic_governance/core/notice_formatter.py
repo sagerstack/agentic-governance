@@ -46,6 +46,7 @@ ACTION_VERBS: dict[str, str] = {
     "denied": "Blocked",
     "blocked": "Blocked",
     "would-deny": "Flagged",
+    "concerns-found": "Flagged",
     "skipped-disabled": "Skipped",
 }
 
